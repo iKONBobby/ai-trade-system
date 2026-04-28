@@ -1,13 +1,12 @@
 {
   "name": "ai-trade-system",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev:server": "pnpm --filter @trade/server dev",
+    "dev:web": "pnpm --filter @trade/web dev",
+    "dev": "pnpm run dev:server & pnpm run dev:web",
+    "build": "pnpm --filter @trade/shared build && pnpm --filter @trade/server build && pnpm --filter @trade/web build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "packageManager": "pnpm@10.13.1"
 }
