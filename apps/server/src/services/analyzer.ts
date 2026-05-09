@@ -1,11 +1,21 @@
 import type { MarketData, KLine, AnalysisResult } from '@trade/shared';
-import { calcBollinger, calcATR, calcMAValues, findSupportResistance } from '../utils/indicators.js';
+import {
+  calcBollinger,
+  calcATR,
+  calcMAValues,
+  findSupportResistance,
+  calcRSI,
+  calcMACD,
+  calcKDJ,
+  calcWR,
+  calcAmplitude,
+  calcVolumeRatio,
+  calcLimitDistance,
+  calcMAArrangement,
+} from '../utils/indicators.js';
 
 /**
  * Run the rule engine analysis on market data and klines.
- * @param market Realtime market data
- * @param klines K-line data (should contain enough bars for MA60/ATR14/etc)
- * @param forceMode Optional forced trading mode
  */
 export function analyze(
   market: MarketData,
@@ -17,6 +27,16 @@ export function analyze(
   const atr = calcATR(klines);
   const ma = calcMAValues(klines);
   const { support, resistance } = findSupportResistance(klines);
+
+  // Advanced indicators
+  const rsi = calcRSI(klines);
+  const macd = calcMACD(klines);
+  const kdj = calcKDJ(klines);
+  const wr = calcWR(klines);
+  const amplitude = calcAmplitude(market.high, market.low, market.preClose);
+  const volumeRatio = calcVolumeRatio(klines);
+  const limitDistance = calcLimitDistance(price, market.preClose);
+  const maArrangement = calcMAArrangement(ma);
 
   // Determine market state
   const bbWidth = bollinger.width;
@@ -47,7 +67,6 @@ export function analyze(
     recommendation = 'grid';
     confidence = Math.max(0, Math.min(100, (1 - bbWidth / 0.15) * 100));
   } else {
-    // trending_up or trending_down
     recommendation = 'condition';
     const maDiff = Math.abs(ma.ma5 - ma.ma20) / (ma.ma20 || 1);
     confidence = Math.min(maDiff * 500, 95);
@@ -82,5 +101,15 @@ export function analyze(
     confidence: Math.round(confidence * 100) / 100,
     gridParams,
     conditionParams,
+    advanced: {
+      rsi,
+      macd,
+      kdj,
+      wr,
+      amplitude,
+      volumeRatio,
+      limitDistance,
+      maArrangement,
+    },
   };
 }

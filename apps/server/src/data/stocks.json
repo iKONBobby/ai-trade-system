@@ -1,0 +1,502 @@
+[
+  {
+    "code": "301028",
+    "name": "鼎熔岩",
+    "market": "SZ"
+  },
+  {
+    "code": "300488",
+    "name": "恒锋工具",
+    "market": "SZ"
+  },
+  {
+    "code": "301183",
+    "name": "东田微",
+    "market": "SZ"
+  },
+  {
+    "code": "688260",
+    "name": "昀冢科技",
+    "market": "SH"
+  },
+  {
+    "code": "300283",
+    "name": "温州宏丰",
+    "market": "SZ"
+  },
+  {
+    "code": "688818",
+    "name": "电科蓝天",
+    "market": "SH"
+  },
+  {
+    "code": "300258",
+    "name": "精锻科技",
+    "market": "SZ"
+  },
+  {
+    "code": "300716",
+    "name": "*ST泉为",
+    "market": "SZ"
+  },
+  {
+    "code": "301369",
+    "name": "联动科技",
+    "market": "SZ"
+  },
+  {
+    "code": "301666",
+    "name": "大普微-UW",
+    "market": "SZ"
+  },
+  {
+    "code": "300736",
+    "name": "百邦科技",
+    "market": "SZ"
+  },
+  {
+    "code": "301030",
+    "name": "*ST仕净",
+    "market": "SZ"
+  },
+  {
+    "code": "688033",
+    "name": "*ST天宜",
+    "market": "SH"
+  },
+  {
+    "code": "688523",
+    "name": "航天环宇",
+    "market": "SH"
+  },
+  {
+    "code": "688655",
+    "name": "迅捷兴",
+    "market": "SH"
+  },
+  {
+    "code": "688017",
+    "name": "绿的谐波",
+    "market": "SH"
+  },
+  {
+    "code": "301387",
+    "name": "光大同创",
+    "market": "SZ"
+  },
+  {
+    "code": "688096",
+    "name": "京源环保",
+    "market": "SH"
+  },
+  {
+    "code": "300106",
+    "name": "西部牧业",
+    "market": "SZ"
+  },
+  {
+    "code": "300819",
+    "name": "聚杰微纤",
+    "market": "SZ"
+  },
+  {
+    "code": "300247",
+    "name": "融捷健康",
+    "market": "SZ"
+  },
+  {
+    "code": "301696",
+    "name": "三瑞智能",
+    "market": "SZ"
+  },
+  {
+    "code": "688693",
+    "name": "锴威特",
+    "market": "SH"
+  },
+  {
+    "code": "300839",
+    "name": "博汇股份",
+    "market": "SZ"
+  },
+  {
+    "code": "688449",
+    "name": "联芸科技",
+    "market": "SH"
+  },
+  {
+    "code": "688001",
+    "name": "华兴源创",
+    "market": "SH"
+  },
+  {
+    "code": "300840",
+    "name": "酷特智能",
+    "market": "SZ"
+  },
+  {
+    "code": "300671",
+    "name": "富满微",
+    "market": "SZ"
+  },
+  {
+    "code": "688048",
+    "name": "长光华芯",
+    "market": "SH"
+  },
+  {
+    "code": "688511",
+    "name": "天微电子",
+    "market": "SH"
+  },
+  {
+    "code": "688783",
+    "name": "西安奕材-U",
+    "market": "SH"
+  },
+  {
+    "code": "300834",
+    "name": "星辉环材",
+    "market": "SZ"
+  },
+  {
+    "code": "300095",
+    "name": "华伍股份",
+    "market": "SZ"
+  },
+  {
+    "code": "301111",
+    "name": "粤万年青",
+    "market": "SZ"
+  },
+  {
+    "code": "000839",
+    "name": "国安股份",
+    "market": "SZ"
+  },
+  {
+    "code": "300983",
+    "name": "尤安设计",
+    "market": "SZ"
+  },
+  {
+    "code": "600076",
+    "name": "康欣新材",
+    "market": "SH"
+  },
+  {
+    "code": "600724",
+    "name": "宁波富达",
+    "market": "SH"
+  },
+  {
+    "code": "002642",
+    "name": "荣联科技",
+    "market": "SZ"
+  },
+  {
+    "code": "600222",
+    "name": "太龙药业",
+    "market": "SH"
+  },
+  {
+    "code": "000720",
+    "name": "新能泰山",
+    "market": "SZ"
+  },
+  {
+    "code": "603028",
+    "name": "赛福天",
+    "market": "SH"
+  },
+  {
+    "code": "600480",
+    "name": "凌云股份",
+    "market": "SH"
+  },
+  {
+    "code": "600984",
+    "name": "建设机械",
+    "market": "SH"
+  },
+  {
+    "code": "605169",
+    "name": "洪通燃气",
+    "market": "SH"
+  },
+  {
+    "code": "600748",
+    "name": "上实发展",
+    "market": "SH"
+  },
+  {
+    "code": "002798",
+    "name": "帝欧水华",
+    "market": "SZ"
+  },
+  {
+    "code": "603878",
+    "name": "武进不锈",
+    "market": "SH"
+  },
+  {
+    "code": "603278",
+    "name": "大业股份",
+    "market": "SH"
+  },
+  {
+    "code": "000678",
+    "name": "襄阳轴承",
+    "market": "SZ"
+  },
+  {
+    "code": "002624",
+    "name": "完美世界",
+    "market": "SZ"
+  },
+  {
+    "code": "000782",
+    "name": "恒申新材",
+    "market": "SZ"
+  },
+  {
+    "code": "600992",
+    "name": "贵绳股份",
+    "market": "SH"
+  },
+  {
+    "code": "600589",
+    "name": "大位科技",
+    "market": "SH"
+  },
+  {
+    "code": "002474",
+    "name": "榕基软件",
+    "market": "SZ"
+  },
+  {
+    "code": "600683",
+    "name": "京投发展",
+    "market": "SH"
+  },
+  {
+    "code": "603937",
+    "name": "丽岛新材",
+    "market": "SH"
+  },
+  {
+    "code": "603012",
+    "name": "创力集团",
+    "market": "SH"
+  },
+  {
+    "code": "600130",
+    "name": "波导股份",
+    "market": "SH"
+  },
+  {
+    "code": "002629",
+    "name": "仁智股份",
+    "market": "SZ"
+  },
+  {
+    "code": "002965",
+    "name": "祥鑫科技",
+    "market": "SZ"
+  },
+  {
+    "code": "002930",
+    "name": "宏川智慧",
+    "market": "SZ"
+  },
+  {
+    "code": "603373",
+    "name": "安邦护卫",
+    "market": "SH"
+  },
+  {
+    "code": "002866",
+    "name": "传艺科技",
+    "market": "SZ"
+  },
+  {
+    "code": "600855",
+    "name": "航天长峰",
+    "market": "SH"
+  },
+  {
+    "code": "002491",
+    "name": "通鼎互联",
+    "market": "SZ"
+  },
+  {
+    "code": "000710",
+    "name": "贝瑞基因",
+    "market": "SZ"
+  },
+  {
+    "code": "605566",
+    "name": "福莱蒽特",
+    "market": "SH"
+  },
+  {
+    "code": "600783",
+    "name": "鲁信创投",
+    "market": "SH"
+  },
+  {
+    "code": "000547",
+    "name": "航天发展",
+    "market": "SZ"
+  },
+  {
+    "code": "603400",
+    "name": "华之杰",
+    "market": "SH"
+  },
+  {
+    "code": "600343",
+    "name": "航天动力",
+    "market": "SH"
+  },
+  {
+    "code": "002865",
+    "name": "钧达股份",
+    "market": "SZ"
+  },
+  {
+    "code": "603667",
+    "name": "五洲新春",
+    "market": "SH"
+  },
+  {
+    "code": "002317",
+    "name": "众生药业",
+    "market": "SZ"
+  },
+  {
+    "code": "002902",
+    "name": "铭普光磁",
+    "market": "SZ"
+  },
+  {
+    "code": "603459",
+    "name": "红板科技",
+    "market": "SH"
+  },
+  {
+    "code": "603045",
+    "name": "福达合金",
+    "market": "SH"
+  },
+  {
+    "code": "002281",
+    "name": "光迅科技",
+    "market": "SZ"
+  },
+  {
+    "code": "605289",
+    "name": "罗曼股份",
+    "market": "SH"
+  },
+  {
+    "code": "605189",
+    "name": "富春染织",
+    "market": "SH"
+  },
+  {
+    "code": "605055",
+    "name": "迎丰股份",
+    "market": "SH"
+  },
+  {
+    "code": "603636",
+    "name": "南威软件",
+    "market": "SH"
+  },
+  {
+    "code": "603618",
+    "name": "杭电股份",
+    "market": "SH"
+  },
+  {
+    "code": "603311",
+    "name": "金海高科",
+    "market": "SH"
+  },
+  {
+    "code": "600936",
+    "name": "北投科技",
+    "market": "SH"
+  },
+  {
+    "code": "600536",
+    "name": "中国软件",
+    "market": "SH"
+  },
+  {
+    "code": "600391",
+    "name": "航发科技",
+    "market": "SH"
+  },
+  {
+    "code": "003036",
+    "name": "泰坦股份",
+    "market": "SZ"
+  },
+  {
+    "code": "002536",
+    "name": "飞龙股份",
+    "market": "SZ"
+  },
+  {
+    "code": "002256",
+    "name": "兆新股份",
+    "market": "SZ"
+  },
+  {
+    "code": "002222",
+    "name": "福晶科技",
+    "market": "SZ"
+  },
+  {
+    "code": "002132",
+    "name": "恒星科技",
+    "market": "SZ"
+  },
+  {
+    "code": "002091",
+    "name": "江苏国泰",
+    "market": "SZ"
+  },
+  {
+    "code": "000659",
+    "name": "珠海中富",
+    "market": "SZ"
+  },
+  {
+    "code": "001267",
+    "name": "汇绿生态",
+    "market": "SZ"
+  },
+  {
+    "code": "002979",
+    "name": "雷赛智能",
+    "market": "SZ"
+  },
+  {
+    "code": "002655",
+    "name": "共达电声",
+    "market": "SZ"
+  },
+  {
+    "code": "002929",
+    "name": "润建股份",
+    "market": "SZ"
+  },
+  {
+    "code": "002580",
+    "name": "圣阳股份",
+    "market": "SZ"
+  }
+]

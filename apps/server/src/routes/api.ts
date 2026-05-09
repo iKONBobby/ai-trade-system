@@ -1,11 +1,31 @@
 import { Router, type Request, type Response } from 'express';
-import type { AnalyzeRequest, AnalyzeResponse } from '@trade/shared';
-import { fetchRealtime, fetchKLine } from '../services/market.js';
+import type { AnalyzeRequest, AnalyzeResponse, StockSearchItem, MarketData, AnalysisResult } from '@trade/shared';
+import { fetchRealtime, fetchKLine, searchStocks } from '../services/market.js';
 import { analyze } from '../services/analyzer.js';
 import { generateSimple, calcLots } from '../services/config-generator.js';
-import { optimize } from '../services/ai-optimizer.js';
+import { aiAnalyze } from '../services/ai-analyzer.js';
 
-export const apiRouter = Router();
+export const apiRouter: Router = Router();
+
+/**
+ * GET /api/stock/search?keyword=xxx
+ * Search stocks by code or name, returns matching suggestions.
+ */
+apiRouter.get('/stock/search', async (req: Request, res: Response) => {
+  try {
+    const keyword = (req.query.keyword as string || '').trim();
+    if (!keyword || keyword.length < 1) {
+      res.json([]);
+      return;
+    }
+
+    const results = await searchStocks(keyword);
+    res.json(results);
+  } catch (err: unknown) {
+    console.error('stock search error:', err);
+    res.status(500).json({ error: 'SEARCH_ERROR', message: 'Search failed' });
+  }
+});
 
 /**
  * GET /api/market/realtime/:code
@@ -13,7 +33,7 @@ export const apiRouter = Router();
  */
 apiRouter.get('/market/realtime/:code', async (req: Request, res: Response) => {
   try {
-    const { code } = req.params;
+    const code = String(req.params.code);
 
     if (!/^\d{6}$/.test(code)) {
       res.status(400).json({ error: 'INVALID_CODE', message: 'Stock code must be 6 digits' });
@@ -40,7 +60,7 @@ apiRouter.get('/market/realtime/:code', async (req: Request, res: Response) => {
  */
 apiRouter.get('/market/kline/:code', async (req: Request, res: Response) => {
   try {
-    const { code } = req.params;
+    const code = String(req.params.code);
 
     if (!/^\d{6}$/.test(code)) {
       res.status(400).json({ error: 'INVALID_CODE', message: 'Stock code must be 6 digits' });
@@ -89,7 +109,7 @@ apiRouter.post('/analyze', async (req: Request, res: Response) => {
       fetchKLine(stockCode),
     ]);
 
-    // Run analysis
+    // Run analysis (rule-engine only, always fast)
     const forceMode = mode === 'auto' ? undefined : mode;
     const analysisResult = analyze(market, klines, forceMode);
 
@@ -103,25 +123,19 @@ apiRouter.post('/analyze', async (req: Request, res: Response) => {
       analysisResult.conditionParams.sellLot = lots;
     }
 
-    // Optional AI optimization
-    const finalAnalysis = useAI
-      ? await optimize(market, analysisResult)
-      : analysisResult;
-
     // Generate config
-    const finalMode = finalAnalysis.recommendation;
     const config = generateSimple({
       strategyId: stockCode,
       market,
-      analysis: finalAnalysis,
+      analysis: analysisResult,
       totalCapital,
       isT0Mode,
-      mode: finalMode,
+      mode: analysisResult.recommendation,
     });
 
     const response: AnalyzeResponse = {
       market,
-      analysis: finalAnalysis,
+      analysis: analysisResult,
       config,
     };
 
@@ -134,5 +148,55 @@ apiRouter.post('/analyze', async (req: Request, res: Response) => {
       console.error('analyze error:', err);
       res.status(500).json({ error: 'SERVER_ERROR', message });
     }
+  }
+});
+
+/**
+ * POST /api/ai-analyze
+ * Unified AI analysis: generates summary + reviews strategy parameters.
+ * Body: { market, analysis, totalCapital, isT0Mode, strategyId }
+ * Returns: { aiResult, config? }
+ */
+apiRouter.post('/ai-analyze', async (req: Request, res: Response) => {
+  try {
+    const { market, analysis: analysisResult, totalCapital, isT0Mode, strategyId } = req.body as {
+      market: MarketData;
+      analysis: AnalysisResult;
+      totalCapital?: number;
+      isT0Mode?: boolean;
+      strategyId?: string;
+    };
+
+    if (!market || !analysisResult) {
+      res.status(400).json({ error: 'INVALID_BODY', message: 'market and analysis are required' });
+      return;
+    }
+
+    const aiResult = await aiAnalyze(market, analysisResult);
+
+    // If AI adjusted params, regenerate the config with AI-adjusted values
+    let adjustedConfig: AnalyzeResponse['config'] | undefined;
+    if (aiResult?.adjustedAnalysis && totalCapital && strategyId) {
+      const adj = aiResult.adjustedAnalysis;
+      const lots = calcLots(totalCapital, market.price, isT0Mode ?? false);
+      if (adj.gridParams) adj.gridParams.lotPerGrid = lots;
+      if (adj.conditionParams) {
+        adj.conditionParams.buyLot = lots;
+        adj.conditionParams.sellLot = lots;
+      }
+      adjustedConfig = generateSimple({
+        strategyId,
+        market,
+        analysis: adj,
+        totalCapital,
+        isT0Mode: isT0Mode ?? false,
+        mode: adj.recommendation,
+      });
+    }
+
+    res.json({ aiResult, config: adjustedConfig });
+  } catch (err: unknown) {
+    console.error('ai-analyze error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR', message: 'AI analysis failed' });
   }
 });

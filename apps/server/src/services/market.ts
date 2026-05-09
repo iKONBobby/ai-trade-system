@@ -1,4 +1,4 @@
-import type { MarketData, KLine } from '@trade/shared';
+import type { MarketData, KLine, StockSearchItem } from '@trade/shared';
 
 /**
  * Convert A-share stock code to EastMoney market code.
@@ -6,6 +6,39 @@ import type { MarketData, KLine } from '@trade/shared';
  */
 function getMarketCode(code: string): string {
   return code.startsWith('6') ? `1.${code}` : `0.${code}`;
+}
+
+interface EastMoneySearchResponse {
+  QuotationCodeTable?: {
+    Data?: Array<{
+      Code: string;
+      Name: string;
+      Market: string; // "1" = SH, "0" = SZ
+    }>;
+  };
+}
+
+/**
+ * Search stocks by keyword (code or name) using EastMoney suggest API.
+ */
+export async function searchStocks(keyword: string): Promise<StockSearchItem[]> {
+  const url = `https://searchadapter.eastmoney.com/api/suggest/get?input=${encodeURIComponent(keyword)}&type=14&token=D43BF722C8E33BDC906FB84D85E326E8`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`EastMoney search API error: ${res.status}`);
+  }
+
+  const json: EastMoneySearchResponse = await res.json();
+  const data = json.QuotationCodeTable?.Data ?? [];
+
+  return data
+    .filter(item => /^\d{6}$/.test(item.Code))
+    .map(item => ({
+      code: item.Code,
+      name: item.Name,
+      market: (item.Market === '1' ? 'SH' : 'SZ') as 'SH' | 'SZ',
+    }));
 }
 
 interface EastMoneyRealtimeResponse {
@@ -68,11 +101,11 @@ interface EastMoneyKLineResponse {
  * @param code Stock code
  * @param days Number of trading days (default 60)
  */
-export async function fetchKLine(code: string, days = 60): Promise<KLine[]> {
+export async function fetchKLine(code: string, days = 60, signal?: AbortSignal): Promise<KLine[]> {
   const marketCode = getMarketCode(code);
   const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${marketCode}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=${days}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal });
   if (!res.ok) {
     throw new Error(`EastMoney KLine API error: ${res.status}`);
   }

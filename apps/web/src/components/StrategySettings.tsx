@@ -70,7 +70,7 @@ export default function StrategySettings({
       {/* Toggle Switches */}
       <div className="space-y-4">
         <ToggleSwitch label="T0 模式（半仓底仓）" checked={isT0} onChange={onT0Change} />
-        <ToggleSwitch label="AI 优化" checked={useAI} onChange={onAIChange} />
+        <ToggleSwitch label="AI 智能分析" checked={useAI} onChange={onAIChange} />
       </div>
     </div>
   );
