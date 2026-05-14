@@ -1,8 +1,8 @@
 {
   "name": "@trade/shared",
   "version": "1.0.0",
-  "main": "./src/types.ts",
-  "types": "./src/types.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "scripts": {
     "build": "tsc --noEmit"
   },

@@ -8,6 +8,107 @@ function getMarketCode(code: string): string {
   return code.startsWith('6') ? `1.${code}` : `0.${code}`;
 }
 
+/**
+ * Network error class — thrown when the upstream API is unreachable (timeout,
+ * DNS, connection refused, 5xx). Distinct from STOCK_NOT_FOUND (which is a
+ * client-input problem). Callers can use this to surface a friendly message.
+ */
+export class UpstreamUnavailableError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = 'UpstreamUnavailableError';
+  }
+}
+
+interface FetchWithRetryOpts {
+  /** Number of retry attempts on network failure (default 0). */
+  retries?: number;
+  /** Per-attempt timeout in ms (default 10000). */
+  timeoutMs?: number;
+  /** External cancellation signal — if aborted, no retry. */
+  signal?: AbortSignal;
+}
+
+function isRetryableNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const cause = (err as { cause?: { code?: string } }).cause;
+  const code = cause?.code;
+  const retryableCodes = new Set([
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_SOCKET',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+  ]);
+  return code !== undefined && retryableCodes.has(code);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch wrapper with explicit per-attempt timeout and retry-with-backoff
+ * on transient network failures. Never retries on 4xx, user-cancellation,
+ * or on STOCK_NOT_FOUND parsing — those are caller-decoded.
+ *
+ *   attempt 1 ──fail──▶ wait 500ms ──▶ attempt 2 ──fail──▶ wait 1500ms ──▶ attempt 3
+ *      │ ok                              │ ok                                 │ ok / final fail
+ *      ▼                                 ▼                                    ▼
+ *   return                            return                                throw
+ */
+async function fetchWithRetry(url: string, opts: FetchWithRetryOpts = {}): Promise<Response> {
+  const { retries = 0, timeoutMs = 10000, signal: externalSignal } = opts;
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (externalSignal?.aborted) {
+      throw new DOMException('Request cancelled by caller', 'AbortError');
+    }
+
+    const perAttemptTimeout = AbortSignal.timeout(timeoutMs);
+    const combinedSignal = externalSignal
+      ? AbortSignal.any([externalSignal, perAttemptTimeout])
+      : perAttemptTimeout;
+
+    try {
+      const res = await fetch(url, { signal: combinedSignal });
+      if (res.status >= 500 && attempt < retries) {
+        lastErr = new Error(`Upstream ${res.status}`);
+      } else {
+        return res;
+      }
+    } catch (err: unknown) {
+      lastErr = err;
+      // user-initiated abort: do not retry
+      if (externalSignal?.aborted) throw err;
+      // not a retryable transport error: bail immediately
+      if (!isRetryableNetworkError(err) && !isTimeoutAbort(err, perAttemptTimeout)) {
+        throw err;
+      }
+    }
+
+    if (attempt < retries) {
+      // 500ms, 1500ms, 4500ms ...
+      const backoffMs = 500 * Math.pow(3, attempt);
+      await sleep(backoffMs);
+    }
+  }
+
+  throw new UpstreamUnavailableError(
+    `Failed to reach ${new URL(url).host} after ${retries + 1} attempt(s)`,
+    lastErr,
+  );
+}
+
+function isTimeoutAbort(err: unknown, timeoutSignal: AbortSignal): boolean {
+  return err instanceof DOMException && err.name === 'AbortError' && timeoutSignal.aborted;
+}
+
 interface EastMoneySearchResponse {
   QuotationCodeTable?: {
     Data?: Array<{
@@ -24,7 +125,7 @@ interface EastMoneySearchResponse {
 export async function searchStocks(keyword: string): Promise<StockSearchItem[]> {
   const url = `https://searchadapter.eastmoney.com/api/suggest/get?input=${encodeURIComponent(keyword)}&type=14&token=D43BF722C8E33BDC906FB84D85E326E8`;
 
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url, { retries: 1, timeoutMs: 8000 });
   if (!res.ok) {
     throw new Error(`EastMoney search API error: ${res.status}`);
   }
@@ -55,15 +156,33 @@ interface EastMoneyRealtimeResponse {
   } | null;
 }
 
+import type { KlinePeriod } from '@trade/shared';
+import { KLINE_PERIOD_TO_KLT } from '@trade/shared';
+
+export interface FetchOpts {
+  /** Number of retries on network failure. Default 0 (no retry, for high-volume scanner). */
+  retries?: number;
+  /** Per-attempt timeout. Default 10s. */
+  timeoutMs?: number;
+  /** Cancellation signal. */
+  signal?: AbortSignal;
+}
+
+export interface KLineFetchOpts extends FetchOpts {
+  /** K-line period. Default 'daily' (klt=101). */
+  period?: KlinePeriod;
+}
+
 /**
  * Fetch realtime market data for a given stock code.
  * Throws 'STOCK_NOT_FOUND' if the stock is not found or no data returned.
+ * Throws UpstreamUnavailableError if eastmoney is unreachable after retries.
  */
-export async function fetchRealtime(code: string): Promise<MarketData> {
+export async function fetchRealtime(code: string, opts: FetchOpts = {}): Promise<MarketData> {
   const marketCode = getMarketCode(code);
   const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${marketCode}&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f116,f117,f162,f167,f168,f169,f170,f171`;
 
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url, opts);
   if (!res.ok) {
     throw new Error(`EastMoney API error: ${res.status}`);
   }
@@ -100,12 +219,23 @@ interface EastMoneyKLineResponse {
  * Fetch K-line (daily) data for a given stock code.
  * @param code Stock code
  * @param days Number of trading days (default 60)
+ * @param signalOrOpts Either an AbortSignal (legacy) or full FetchOpts. Legacy
+ *   signal-only call kept for backwards-compat with engine.ts mass scan path.
  */
-export async function fetchKLine(code: string, days = 60, signal?: AbortSignal): Promise<KLine[]> {
+export async function fetchKLine(
+  code: string,
+  days = 60,
+  signalOrOpts?: AbortSignal | KLineFetchOpts,
+): Promise<KLine[]> {
+  const opts: KLineFetchOpts =
+    signalOrOpts instanceof AbortSignal
+      ? { signal: signalOrOpts }
+      : signalOrOpts ?? {};
+  const klt = KLINE_PERIOD_TO_KLT[opts.period ?? 'daily'];
   const marketCode = getMarketCode(code);
-  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${marketCode}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=${days}`;
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${marketCode}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=${klt}&fqt=1&end=20500101&lmt=${days}`;
 
-  const res = await fetch(url, { signal });
+  const res = await fetchWithRetry(url, opts);
   if (!res.ok) {
     throw new Error(`EastMoney KLine API error: ${res.status}`);
   }

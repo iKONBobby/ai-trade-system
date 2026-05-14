@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
-import type { AnalyzeRequest, AnalyzeResponse, StockSearchItem, MarketData, AnalysisResult } from '@trade/shared';
-import { fetchRealtime, fetchKLine, searchStocks } from '../services/market.js';
+import type { AnalyzeRequest, AnalyzeResponse, StockSearchItem, MarketData, AnalysisResult, KlinePeriod } from '@trade/shared';
+import { KLINE_PERIODS, KLINE_MINUTE_PERIODS } from '@trade/shared';
+import { fetchRealtime, fetchKLine, searchStocks, UpstreamUnavailableError } from '../services/market.js';
 import { analyze } from '../services/analyzer.js';
 import { generateSimple, calcLots } from '../services/config-generator.js';
 import { aiAnalyze } from '../services/ai-analyzer.js';
@@ -22,6 +23,11 @@ apiRouter.get('/stock/search', async (req: Request, res: Response) => {
     const results = await searchStocks(keyword);
     res.json(results);
   } catch (err: unknown) {
+    if (err instanceof UpstreamUnavailableError) {
+      console.error('stock search upstream timeout:', err.message);
+      res.status(503).json({ error: 'UPSTREAM_UNAVAILABLE', message: '搜索服务暂时连不上' });
+      return;
+    }
     console.error('stock search error:', err);
     res.status(500).json({ error: 'SEARCH_ERROR', message: 'Search failed' });
   }
@@ -40,12 +46,15 @@ apiRouter.get('/market/realtime/:code', async (req: Request, res: Response) => {
       return;
     }
 
-    const data = await fetchRealtime(code);
+    const data = await fetchRealtime(code, { retries: 2, timeoutMs: 8000 });
     res.json(data);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     if (message === 'STOCK_NOT_FOUND') {
-      res.status(404).json({ error: 'STOCK_NOT_FOUND', message: 'Stock not found or delisted' });
+      res.status(404).json({ error: 'STOCK_NOT_FOUND', message: '股票代码未找到或已退市' });
+    } else if (err instanceof UpstreamUnavailableError) {
+      console.error('realtime upstream timeout:', err.message);
+      res.status(503).json({ error: 'UPSTREAM_UNAVAILABLE', message: '行情服务暂时连不上' });
     } else {
       console.error('realtime error:', err);
       res.status(500).json({ error: 'SERVER_ERROR', message });
@@ -67,13 +76,46 @@ apiRouter.get('/market/kline/:code', async (req: Request, res: Response) => {
       return;
     }
 
-    const days = Math.min(365, Math.max(1, parseInt(req.query.days as string, 10) || 60));
-    const data = await fetchKLine(code, days);
-    res.json(data);
+    // period query: optional, defaults to 'daily'
+    const periodParam = req.query.period as string | undefined;
+    const period: KlinePeriod = (periodParam ?? 'daily') as KlinePeriod;
+    if (periodParam !== undefined && !KLINE_PERIODS.includes(period)) {
+      res.status(400).json({ error: 'INVALID_PERIOD', message: `period must be one of: ${KLINE_PERIODS.join(', ')}` });
+      return;
+    }
+
+    // days query: strict validation, 1..1000 inclusive
+    const daysRaw = req.query.days;
+    let days = 60;
+    if (daysRaw !== undefined) {
+      const parsed = parseInt(daysRaw as string, 10);
+      if (isNaN(parsed) || parsed < 1 || parsed > 1000) {
+        res.status(400).json({ error: 'INVALID_DAYS', message: 'days must be an integer between 1 and 1000' });
+        return;
+      }
+      days = parsed;
+    }
+
+    try {
+      const data = await fetchKLine(code, days, { retries: 2, timeoutMs: 8000, period });
+      res.json(data);
+    } catch (err: unknown) {
+      // ENG-D1: for minute-level periods, "no klines this period" is normal (weekend/holiday)
+      // and must return 200+[] not 404. fetchKLine conflates this with STOCK_NOT_FOUND for
+      // historical reasons (existing /analyze depends on it), so we translate here.
+      if (err instanceof Error && err.message === 'STOCK_NOT_FOUND' && KLINE_MINUTE_PERIODS.includes(period)) {
+        res.json([]);
+        return;
+      }
+      throw err;
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     if (message === 'STOCK_NOT_FOUND') {
-      res.status(404).json({ error: 'STOCK_NOT_FOUND', message: 'Stock not found or delisted' });
+      res.status(404).json({ error: 'STOCK_NOT_FOUND', message: '股票代码未找到或已退市' });
+    } else if (err instanceof UpstreamUnavailableError) {
+      console.error('kline upstream timeout:', err.message);
+      res.status(503).json({ error: 'UPSTREAM_UNAVAILABLE', message: '行情服务暂时连不上' });
     } else {
       console.error('kline error:', err);
       res.status(500).json({ error: 'SERVER_ERROR', message });
@@ -103,10 +145,10 @@ apiRouter.post('/analyze', async (req: Request, res: Response) => {
       return;
     }
 
-    // Fetch market and kline in parallel
+    // Fetch market and kline in parallel — retry twice on transient network failures
     const [market, klines] = await Promise.all([
-      fetchRealtime(stockCode),
-      fetchKLine(stockCode),
+      fetchRealtime(stockCode, { retries: 2, timeoutMs: 8000 }),
+      fetchKLine(stockCode, 60, { retries: 2, timeoutMs: 8000 }),
     ]);
 
     // Run analysis (rule-engine only, always fast)
@@ -143,7 +185,13 @@ apiRouter.post('/analyze', async (req: Request, res: Response) => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     if (message === 'STOCK_NOT_FOUND') {
-      res.status(404).json({ error: 'STOCK_NOT_FOUND', message: 'Stock not found or delisted' });
+      res.status(404).json({ error: 'STOCK_NOT_FOUND', message: '股票代码未找到或已退市' });
+    } else if (err instanceof UpstreamUnavailableError) {
+      console.error('analyze upstream timeout:', err.message);
+      res.status(503).json({
+        error: 'UPSTREAM_UNAVAILABLE',
+        message: '行情服务暂时连不上（东方财富 API 超时），请几分钟后重试',
+      });
     } else {
       console.error('analyze error:', err);
       res.status(500).json({ error: 'SERVER_ERROR', message });

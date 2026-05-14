@@ -1,59 +1,265 @@
-import type { ScreenerResult, Strategy, TriggeredFactor, StockListItem } from '@trade/shared';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { ScreenerResult, Strategy, TriggeredFactor, StockListItem, ScanSnapshot } from '@trade/shared';
+import { isGEM, isSTAR } from '@trade/shared';
 import type { ScanningJob } from './types.js';
 import { getStrategy } from './strategies.js';
 import { getFactor } from './factors.js';
 import { fetchRealtime, fetchKLine } from '../market.js';
+import { getPersistence } from '../persistence-container.js';
+import { JsonStore } from '../storage/json-store.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const STOCKS_CACHE_PATH = path.resolve(__dirname, '../../../data/stocks-cache.json');
+
+export interface ScanBoardOpts {
+  /** 包含创业板（300xxx）。默认 false。 */
+  includeGEM?: boolean;
+  /** 包含科创板（688xxx）。默认 false。 */
+  includeSTAR?: boolean;
+}
+
+// Allow tests to inject a fake history sink without booting the full container.
+type HistorySink = { append: (snap: ScanSnapshot) => Promise<void> };
+let historySinkOverride: HistorySink | null = null;
+export function __setHistorySinkForTest(sink: HistorySink | null): void {
+  historySinkOverride = sink;
+}
 
 // ── Stock list cache ──────────────────────────────────────────────
+//
+// The A-share ticker list is near-static (a handful of IPOs/delistings per week),
+// so we treat it as a long-lived cache rather than something to re-fetch each boot.
+//
+// Boot order (no network on the hot path):
+//   1. Read data/stocks-cache.json — the last successful EastMoney snapshot.
+//   2. If absent/empty, fall back to the bundled src/data/stocks.json seed (100 stocks).
+//   3. Mark loaded; the server can start handling requests immediately.
+//   4. Kick off a background refresh — on success, replace memory cache + persist to disk.
+//   5. Schedule hourly background refresh; failures are silent (keep prior cache).
 
 let stockListCache: StockListItem[] = [];
 let stockListLoaded = false;
 
-async function fetchStockListFromEastMoney(): Promise<StockListItem[]> {
-  const url = 'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=5000&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f12,f14';
-  const resp = await fetch(url);
-  const json = await resp.json() as {
-    data?: { diff?: Array<{ f12: string; f14: string }> };
+interface StockCacheFile {
+  /** Unix ms of the last successful EastMoney fetch. 0 means "never". */
+  fetchedAt: number;
+  stocks: StockListItem[];
+}
+
+interface StockCacheStore {
+  read(): Promise<StockCacheFile>;
+  update(fn: (data: StockCacheFile) => StockCacheFile): Promise<StockCacheFile>;
+}
+
+let stockCacheStore: StockCacheStore = new JsonStore<StockCacheFile>(STOCKS_CACHE_PATH, { fetchedAt: 0, stocks: [] });
+
+/** Test seam — inject an in-memory store so unit tests don't touch the real disk. */
+export function __setStockCacheStoreForTest(store: StockCacheStore | null): void {
+  stockCacheStore = store ?? new JsonStore<StockCacheFile>(STOCKS_CACHE_PATH, { fetchedAt: 0, stocks: [] });
+}
+
+/** Test seam — reset module state so initStockList() can be exercised more than once. */
+export function __resetStockListForTest(): void {
+  stockListCache = [];
+  stockListLoaded = false;
+}
+
+// EastMoney clist API caps each page at 100 rows server-side regardless of pz.
+// We paginate until cumulative count reaches data.total (or pages run out).
+const EM_PAGE_SIZE = 100;
+const EM_MAX_PAGES = 80; // safety net: 80 * 100 = 8000 > current A-share total ~5500
+const EM_PAGE_TIMEOUT_MS = 10000;
+
+// EastMoney serves the clist API on both the apex host and many numbered shard
+// subdomains (N.push2.eastmoney.com). When the apex returns 502 / empty replies
+// (observed in prod), individual shards may still answer. We try a randomized
+// pool per page and remember the last good host to short-circuit subsequent pages.
+const EM_HOSTS: readonly string[] = [
+  'push2.eastmoney.com',
+  '1.push2.eastmoney.com',
+  '5.push2.eastmoney.com',
+  '22.push2.eastmoney.com',
+  '29.push2.eastmoney.com',
+  '48.push2.eastmoney.com',
+  '76.push2.eastmoney.com',
+  '82.push2.eastmoney.com',
+  '90.push2.eastmoney.com',
+  '99.push2.eastmoney.com',
+];
+
+const EM_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Referer': 'https://quote.eastmoney.com/',
+};
+
+let lastGoodHost: string | null = null;
+
+function shuffled<T>(arr: readonly T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+interface ClistResponse {
+  data?: {
+    total?: number;
+    diff?: Array<{ f12: string; f14: string }>;
   };
-  const items = json.data?.diff ?? [];
-  return items
-    .filter((item) => /^\d{6}$/.test(item.f12))
-    .map((item) => ({
-      code: item.f12,
-      name: item.f14,
-      market: (item.f12.startsWith('6') ? 'SH' : 'SZ') as 'SH' | 'SZ',
-    }));
+}
+
+// Exposed for tests so they can stub one page without monkey-patching global fetch.
+let clistFetcher: (pn: number, pz: number) => Promise<ClistResponse> = defaultClistFetch;
+export function __setClistFetcherForTest(fn: ((pn: number, pz: number) => Promise<ClistResponse>) | null): void {
+  clistFetcher = fn ?? defaultClistFetch;
+}
+
+async function defaultClistFetch(pn: number, pz: number): Promise<ClistResponse> {
+  const path = `/api/qt/clist/get?pn=${pn}&pz=${pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f12,f14`;
+  const order = lastGoodHost
+    ? [lastGoodHost, ...shuffled(EM_HOSTS.filter((h) => h !== lastGoodHost))]
+    : shuffled(EM_HOSTS);
+
+  let lastErr: Error | null = null;
+  for (const host of order) {
+    try {
+      const resp = await fetch(`https://${host}${path}`, {
+        signal: AbortSignal.timeout(EM_PAGE_TIMEOUT_MS),
+        headers: EM_HEADERS,
+      });
+      if (!resp.ok) {
+        lastErr = new Error(`EastMoney clist HTTP ${resp.status} via ${host} (pn=${pn})`);
+        continue;
+      }
+      const json = (await resp.json()) as ClistResponse;
+      lastGoodHost = host;
+      return json;
+    } catch (err) {
+      lastErr = err as Error;
+    }
+  }
+  lastGoodHost = null;
+  throw lastErr ?? new Error(`EastMoney clist: all ${EM_HOSTS.length} hosts failed (pn=${pn})`);
+}
+
+async function fetchStockListFromEastMoney(): Promise<StockListItem[]> {
+  const accum: StockListItem[] = [];
+  const seen = new Set<string>();
+  let total: number | null = null;
+
+  for (let pn = 1; pn <= EM_MAX_PAGES; pn++) {
+    const json = await clistFetcher(pn, EM_PAGE_SIZE);
+    const data = json.data ?? {};
+    const diff = data.diff ?? [];
+    if (total === null && typeof data.total === 'number') total = data.total;
+
+    if (diff.length === 0) break;
+
+    for (const item of diff) {
+      if (!/^\d{6}$/.test(item.f12) || seen.has(item.f12)) continue;
+      seen.add(item.f12);
+      accum.push({
+        code: item.f12,
+        name: item.f14,
+        market: item.f12.startsWith('6') ? 'SH' : 'SZ',
+      });
+    }
+
+    // Stop when we've collected all the server says exists, or when a page comes back short.
+    if (total !== null && accum.length >= total) break;
+    if (diff.length < EM_PAGE_SIZE) break;
+  }
+
+  // Sanity check: A-share market is ~5500 stocks. Anything under 4000 likely means
+  // the upstream truncated mid-way or returned a degraded response — don't cache it.
+  const MIN_EXPECTED = 4000;
+  if (accum.length < MIN_EXPECTED) {
+    throw new Error(`EastMoney clist returned only ${accum.length} stocks (total reported: ${total ?? 'unknown'}) — suspicious, refusing to cache`);
+  }
+  return accum;
+}
+
+async function tryFetchWithBackoff(): Promise<StockListItem[] | null> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const list = await fetchStockListFromEastMoney();
+      console.log(`[SCREENER] Stock list fetched on attempt ${attempt}: ${list.length} stocks`);
+      return list;
+    } catch (err) {
+      console.warn(`[SCREENER] fetch attempt ${attempt}/3 failed: ${(err as Error).message}`);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
+  return null;
+}
+
+async function loadBundledFallback(): Promise<StockListItem[]> {
+  try {
+    const { default: bundled } = await import('../../data/stocks.json', { with: { type: 'json' } });
+    return bundled as StockListItem[];
+  } catch {
+    return [];
+  }
+}
+
+async function persistSnapshot(list: StockListItem[]): Promise<void> {
+  try {
+    await stockCacheStore.update(() => ({ fetchedAt: Date.now(), stocks: list }));
+  } catch (err) {
+    // Non-fatal: in-memory cache is still updated; we'll try again on next refresh.
+    console.warn(`[SCREENER] Failed to persist stock cache to disk: ${(err as Error).message}`);
+  }
+}
+
+/** Pull from EastMoney; on success, replace memory cache and persist to disk. */
+async function backgroundRefresh(): Promise<void> {
+  const list = await tryFetchWithBackoff();
+  if (!list) return; // upstream unreachable — keep prior cache
+  stockListCache = list;
+  await persistSnapshot(list);
+  console.log(`[SCREENER] Stock list refreshed: ${list.length} stocks (persisted to disk)`);
 }
 
 export async function initStockList(): Promise<void> {
   if (stockListLoaded) return;
-  try {
-    stockListCache = await fetchStockListFromEastMoney();
-    stockListLoaded = true;
-    console.log(`[SCREENER] Stock list loaded: ${stockListCache.length} stocks`);
-  } catch {
-    // Fallback: try bundled JSON
-    try {
-      const { default: bundled } = await import('../../data/stocks.json', { with: { type: 'json' } });
-      stockListCache = bundled as StockListItem[];
-      stockListLoaded = true;
-      console.log(`[SCREENER] Stock list loaded from fallback: ${stockListCache.length} stocks`);
-    } catch {
-      console.error('[SCREENER] Failed to load stock list');
-      stockListCache = [];
-      stockListLoaded = true;
+
+  // Hot path: disk-only, no network. Boot should be ~instant.
+  const cached = await stockCacheStore.read();
+  if (cached.stocks.length > 0) {
+    stockListCache = cached.stocks;
+    const ageDays = cached.fetchedAt ? ((Date.now() - cached.fetchedAt) / 86400000).toFixed(1) : '?';
+    console.log(`[SCREENER] Stock list loaded from disk cache: ${stockListCache.length} stocks (age ${ageDays}d)`);
+  } else {
+    stockListCache = await loadBundledFallback();
+    if (stockListCache.length > 0) {
+      console.log(`[SCREENER] Stock list loaded from bundled fallback: ${stockListCache.length} stocks (will refresh in background)`);
+    } else {
+      console.error('[SCREENER] No disk cache and bundled fallback failed — cache empty; will retry from EastMoney in background');
     }
   }
+  stockListLoaded = true;
 
-  // Hourly refresh
-  setInterval(async () => {
-    try {
-      stockListCache = await fetchStockListFromEastMoney();
-      console.log(`[SCREENER] Stock list refreshed: ${stockListCache.length} stocks`);
-    } catch {
-      // Keep previous cache on refresh failure
-    }
-  }, 3600000);
+  // Background refresh — does not block the caller. If EastMoney is up we'll have
+  // fresh data in seconds; if it's down we stay on the cached/bundled snapshot.
+  void backgroundRefresh();
+
+  // Hourly refresh (keeps the snapshot current without ever blocking requests).
+  setInterval(() => { void backgroundRefresh(); }, 3600000);
+}
+
+/** Manual refresh — useful when initial fetch failed (e.g., DNS issues at server start). */
+export async function refreshStockList(): Promise<{ ok: boolean; count: number; message?: string }> {
+  const list = await tryFetchWithBackoff();
+  if (list) {
+    stockListCache = list;
+    await persistSnapshot(list);
+    return { ok: true, count: list.length };
+  }
+  return { ok: false, count: stockListCache.length, message: 'eastmoney unreachable after 3 attempts' };
 }
 
 export function getStockList(): StockListItem[] {
@@ -175,7 +381,11 @@ export function cancelJob(jobId: string): boolean {
   return true;
 }
 
-export async function runScreener(strategyIds: string[], marketFilter?: string): Promise<string[]> {
+export async function runScreener(
+  strategyIds: string[],
+  marketFilter?: string,
+  boards: ScanBoardOpts = {},
+): Promise<string[]> {
   startJobCleanup();
 
   const effectiveIds = strategyIds.length > 0 ? strategyIds : ['ma_bullish'];
@@ -193,7 +403,7 @@ export async function runScreener(strategyIds: string[], marketFilter?: string):
   jobs.set(jobId, job);
 
   // Run async
-  runScan(job, marketFilter).catch((err) => {
+  runScan(job, marketFilter, boards).catch((err) => {
     if (job.status !== 'cancelled') {
       job.status = 'error';
       job.error = err instanceof Error ? err.message : 'Unknown error';
@@ -204,18 +414,78 @@ export async function runScreener(strategyIds: string[], marketFilter?: string):
   return [jobId];
 }
 
-async function runScan(job: ScanningJob, marketFilter?: string): Promise<void> {
+/** Filter the stock list to keep only main-board codes unless GEM/STAR explicitly included. */
+export function filterByBoards(stocks: StockListItem[], opts: ScanBoardOpts): StockListItem[] {
+  const { includeGEM = false, includeSTAR = false } = opts;
+  if (includeGEM && includeSTAR) return stocks;
+  return stocks.filter((s) => {
+    if (!includeGEM && isGEM(s.code)) return false;
+    if (!includeSTAR && isSTAR(s.code)) return false;
+    return true;
+  });
+}
+
+const ALLOWED_FILTERS: ScanSnapshot['marketFilter'][] = ['all', 'sh', 'sz', 'hs300'];
+
+function normalizeFilter(filter: string | undefined): ScanSnapshot['marketFilter'] {
+  if (filter && (ALLOWED_FILTERS as string[]).includes(filter)) return filter as ScanSnapshot['marketFilter'];
+  return 'all';
+}
+
+async function recordSnapshot(job: ScanningJob, marketFilter: string | undefined): Promise<void> {
+  const sink: HistorySink = historySinkOverride ?? getPersistence().history;
+  const completedAt = new Date();
+  const snapshot: ScanSnapshot = {
+    id: job.id,
+    date: completedAt.toISOString().slice(0, 10),
+    timestamp: completedAt.toISOString(),
+    strategyIds: job.strategyIds,
+    marketFilter: normalizeFilter(marketFilter),
+    durationMs: Date.now() - job.startedAt,
+    results: Object.fromEntries(job.results),
+  };
+  try {
+    await sink.append(snapshot);
+    console.log(`[HISTORY:WRITE] id=${snapshot.id} results=${Object.values(snapshot.results).reduce((s, a) => s + a.length, 0)}`);
+  } catch (err) {
+    // best-effort: NEVER throw; failure must not affect API response
+    console.error(`[HISTORY:WRITE_FAIL] id=${snapshot.id}`, err);
+  }
+}
+
+/** Test-only helper: drive recordSnapshot with a fabricated job. */
+export async function __recordSnapshotForTest(opts: {
+  marketFilter?: string;
+  strategyIds?: string[];
+  resultsMap?: Map<string, ScreenerResult[]>;
+}): Promise<void> {
+  const fakeJob: ScanningJob = {
+    id: `job_test_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    strategyIds: opts.strategyIds ?? ['ma_bullish'],
+    status: 'done',
+    progress: { scanned: 0, total: 0 },
+    results: opts.resultsMap ?? new Map(),
+    startedAt: Date.now() - 1000,
+    abortController: new AbortController(),
+  };
+  await recordSnapshot(fakeJob, opts.marketFilter);
+}
+
+async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoardOpts = {}): Promise<void> {
   const signal = job.abortController.signal;
-  console.log(`[SCREENER:START] job=${job.id} strategies=${job.strategyIds.join(',')}`);
+  console.log(`[SCREENER:START] job=${job.id} strategies=${job.strategyIds.join(',')} boards=${JSON.stringify(boards)}`);
 
   // Get stock list
   let stocks = getStockList();
+  // Default: exclude 创业板(300xxx) + 科创板(688xxx). User must explicitly opt in via includeGEM/includeSTAR.
+  stocks = filterByBoards(stocks, boards);
   if (marketFilter && marketFilter !== 'all') {
     if (marketFilter === 'sh') stocks = stocks.filter((s) => s.market === 'SH');
     else if (marketFilter === 'sz') stocks = stocks.filter((s) => s.market === 'SZ');
     // hs300 handled later
   }
   job.progress.total = stocks.length;
+  console.log(`[SCREENER] runScan: ${stocks.length} stocks after filter (cache=${getStockList().length}, marketFilter=${marketFilter ?? 'all'}, boards=${JSON.stringify(boards)})`);
 
   const results = new Map<string, ScreenerResult[]>();
   for (const sid of job.strategyIds) {
@@ -285,13 +555,11 @@ async function runScan(job: ScanningJob, marketFilter?: string): Promise<void> {
           market = await fetchRealtime(stock.code);
         } catch {
           adjustConcurrency(true);
-          job.progress.scanned++;
-          return;
+          return; // finally still runs and increments scanned exactly once
         }
 
         if (!prefilterStock(market)) {
           adjustConcurrency(false);
-          job.progress.scanned++;
           return;
         }
 
@@ -301,13 +569,11 @@ async function runScan(job: ScanningJob, marketFilter?: string): Promise<void> {
           klines = await fetchKLine(stock.code, 60, signal);
         } catch {
           adjustConcurrency(true);
-          job.progress.scanned++;
           return;
         }
 
         if (klines.length < 20) {
           adjustConcurrency(false);
-          job.progress.scanned++;
           return;
         }
 
@@ -362,4 +628,7 @@ async function runScan(job: ScanningJob, marketFilter?: string): Promise<void> {
   job.status = 'done';
   const totalResults = Array.from(job.results.values()).reduce((sum, arr) => sum + arr.length, 0);
   console.log(`[SCREENER:DONE] job=${job.id} results=${totalResults} duration=${((Date.now() - job.startedAt) / 1000).toFixed(1)}s`);
+
+  // ENG-D3: persistence is best-effort, isolated from job lifecycle
+  void recordSnapshot(job, marketFilter);
 }

@@ -1,19 +1,160 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg-primary: #0f0f0f;
-  --color-bg-card: #1a1a1a;
-  --color-bg-card-hover: #222222;
+  /* === DESIGN.md tokens (canonical) === */
+  --color-surface-base: #0a0b0d;
+  --color-surface-1: #14161a;
+  --color-surface-2: #1c1f24;
+  --color-surface-3: #262a31;
+  --color-surface-hover: #20232a;
+
+  --color-text-1: #f4f5f7;
+  --color-text-2: #9ca3af;
+  --color-text-3: #6b7280;
+  --color-text-disabled: #4b5563;
+
+  --color-border-1: #262a31;
+  --color-border-2: #353a44;
+
+  --color-up: #ef4444;
+  --color-up-bg: rgba(239, 68, 68, 0.08);
+  --color-up-dim: #7f1d1d;
+  --color-down: #22c55e;
+  --color-down-bg: rgba(34, 197, 94, 0.08);
+  --color-down-dim: #14532d;
+  --color-flat: #94a3b8;
+
   --color-accent: #10b981;
-  --color-accent-dim: #065f46;
+  --color-accent-strong: #059669;
+  --color-accent-bg: rgba(16, 185, 129, 0.1);
+  --color-accent-border: rgba(16, 185, 129, 0.25);
+
+  --color-info: #3b82f6;
+  --color-info-bg: rgba(59, 130, 246, 0.1);
+  --color-warning: #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.1);
   --color-danger: #ef4444;
-  --color-text-primary: #f5f5f5;
-  --color-text-secondary: #a3a3a3;
-  --color-border: #2a2a2a;
+  --color-danger-bg: rgba(239, 68, 68, 0.1);
+  --color-success: #10b981;
+
+  /* === Legacy aliases (kept so screener/analysis/news don't break) === */
+  --color-bg-primary: #0a0b0d;
+  --color-bg-card: #14161a;
+  --color-bg-card-hover: #20232a;
+  --color-accent-dim: #14532d;
+  --color-text-primary: #f4f5f7;
+  --color-text-secondary: #9ca3af;
+  --color-border: #262a31;
+}
+
+:root {
+  /* Raw CSS vars for non-Tailwind consumers (inline style, plain CSS) */
+  --surface-base: #0a0b0d;
+  --surface-1: #14161a;
+  --surface-2: #1c1f24;
+  --surface-3: #262a31;
+  --surface-hover: #20232a;
+  --text-1: #f4f5f7;
+  --text-2: #9ca3af;
+  --text-3: #6b7280;
+  --text-disabled: #4b5563;
+  --border-1: #262a31;
+  --border-2: #353a44;
+  --up: #ef4444;
+  --up-bg: rgba(239, 68, 68, 0.08);
+  --up-dim: #7f1d1d;
+  --down: #22c55e;
+  --down-bg: rgba(34, 197, 94, 0.08);
+  --down-dim: #14532d;
+  --flat: #94a3b8;
+  --accent: #10b981;
+  --accent-strong: #059669;
+  --accent-bg: rgba(16, 185, 129, 0.1);
+  --accent-border: rgba(16, 185, 129, 0.25);
+  --info: #3b82f6;
+  --info-bg: rgba(59, 130, 246, 0.1);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.1);
+  --success: #10b981;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+  --r-pill: 9999px;
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.5), 0 4px 8px rgba(0, 0, 0, 0.3);
+
+  --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-num: 'Inter', 'Noto Sans SC', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --text-h1: 28px;
+  --text-h2: 20px;
+  --text-h3: 15px;
+  --text-body: 13px;
+  --text-sm: 12px;
+  --text-xs: 11px;
+  --text-tiny: 10px;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-1: 120ms;
+  --motion-2: 200ms;
+  --motion-3: 320ms;
+
+  --sidebar-w: 220px;
 }
 
 body {
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--surface-base);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular-num helper for any price/percent display */
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum', 'cv11';
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Focus ring */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -1,23 +1,8 @@
 import type { KLine, BollingerResult, MAResult, RSIResult, MACDResult, KDJResult, WRResult } from '@trade/shared';
 
-/**
- * Calculate Simple Moving Average for a given period.
- */
-export function calcMA(klines: KLine[], period: number): number[] {
-  const result: number[] = [];
-  for (let i = 0; i < klines.length; i++) {
-    if (i < period - 1) {
-      result.push(NaN);
-      continue;
-    }
-    let sum = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      sum += klines[j].close;
-    }
-    result.push(sum / period);
-  }
-  return result;
-}
+// calcMA moved to @trade/shared/indicators (returns (number|null)[] with O(N) rolling window).
+// Re-export so legacy callers still work; new callers import from @trade/shared directly.
+export { calcMA } from '@trade/shared';
 
 /**
  * Calculate Exponential Moving Average.

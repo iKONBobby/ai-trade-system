@@ -1,10 +1,26 @@
 import { Router, type Request, type Response } from 'express';
 import type { ScreenerRunRequest } from '@trade/shared';
 import { listStrategies } from '../services/screener/strategies.js';
-import { runScreener, getJob, cancelJob } from '../services/screener/engine.js';
+import { runScreener, getJob, cancelJob, refreshStockList, getStockList } from '../services/screener/engine.js';
 import { toJobProgress } from '../services/screener/types.js';
 
 export const screenerRouter: Router = Router();
+
+/** POST /api/screener/refresh-stocks — manually re-pull the stock list from EastMoney. */
+screenerRouter.post('/refresh-stocks', async (_req: Request, res: Response) => {
+  try {
+    const result = await refreshStockList();
+    res.json(result);
+  } catch (err: unknown) {
+    console.error('refresh-stocks error:', err);
+    res.status(500).json({ ok: false, count: getStockList().length, message: 'unexpected error' });
+  }
+});
+
+/** GET /api/screener/stock-count — diagnostic: current cache size. */
+screenerRouter.get('/stock-count', (_req: Request, res: Response) => {
+  res.json({ count: getStockList().length });
+});
 
 /** GET /api/screener/strategies — list all available strategies */
 screenerRouter.get('/strategies', (_req: Request, res: Response) => {
@@ -20,7 +36,7 @@ screenerRouter.get('/strategies', (_req: Request, res: Response) => {
 /** POST /api/screener/run — start a screening job */
 screenerRouter.post('/run', async (req: Request, res: Response) => {
   try {
-    const { strategyIds, market } = req.body as ScreenerRunRequest;
+    const { strategyIds, market, includeGEM, includeSTAR } = req.body as ScreenerRunRequest;
 
     if (!strategyIds || !Array.isArray(strategyIds) || strategyIds.length === 0) {
       res.status(400).json({ error: 'INVALID_STRATEGY', message: 'strategyIds must be a non-empty array' });
@@ -38,7 +54,10 @@ screenerRouter.post('/run', async (req: Request, res: Response) => {
       return;
     }
 
-    const jobIds = await runScreener(strategyIds, market ?? 'all');
+    const jobIds = await runScreener(strategyIds, market ?? 'all', {
+      includeGEM: includeGEM === true,
+      includeSTAR: includeSTAR === true,
+    });
     res.json({ jobIds });
   } catch (err: unknown) {
     console.error('screener run error:', err);

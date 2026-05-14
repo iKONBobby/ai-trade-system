@@ -1,4 +1,21 @@
-import type { AnalyzeRequest, AnalyzeResponse, StockSearchItem, MarketData, AnalysisResult, AIAnalysisResult, JobProgress, ScreenerResult, StrategyStats } from '@trade/shared';
+import type {
+  AnalyzeRequest,
+  AnalyzeResponse,
+  StockSearchItem,
+  MarketData,
+  AnalysisResult,
+  AIAnalysisResult,
+  JobProgress,
+  ScreenerResult,
+  FavoriteEntry,
+  HistoryRange,
+  HistoryDateGroup,
+  ScanSnapshot,
+  SnapshotDiff,
+  BackupBundle,
+  KLine,
+  KlinePeriod,
+} from '@trade/shared';
 
 const BASE = '/api';
 
@@ -14,7 +31,8 @@ export async function searchStocks(keyword: string): Promise<StockSearchItem[]> 
 
 export async function analyzeStock(params: AnalyzeRequest): Promise<AnalyzeResponse> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  // Server-side retries can take up to ~3 * 8s = 24s, give some headroom
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
     const res = await fetch(`${BASE}/analyze`, {
@@ -25,8 +43,9 @@ export async function analyzeStock(params: AnalyzeRequest): Promise<AnalyzeRespo
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || '请求失败');
+      const err = await res.json().catch(() => ({}));
+      // Prefer server-provided friendly message over the error code
+      throw new Error(err.message || err.error || `请求失败 (${res.status})`);
     }
 
     return res.json();
@@ -80,11 +99,15 @@ export async function fetchStrategies(): Promise<{ id: string; name: string; des
   return res.json();
 }
 
-export async function runScreener(strategyIds: string[], market?: string): Promise<{ jobIds: string[] }> {
+export async function runScreener(
+  strategyIds: string[],
+  market?: string,
+  opts: { includeGEM?: boolean; includeSTAR?: boolean } = {},
+): Promise<{ jobIds: string[] }> {
   const res = await fetch(`${BASE}/screener/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ strategyIds, market }),
+    body: JSON.stringify({ strategyIds, market, includeGEM: opts.includeGEM, includeSTAR: opts.includeSTAR }),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -106,18 +129,113 @@ export async function cancelScreenerJob(jobId: string): Promise<void> {
   await fetch(`${BASE}/screener/jobs/${jobId}`, { method: 'DELETE' });
 }
 
-// Simple in-memory stats (MVP: tracked client-side)
-const statsStore = new Map<string, { scans: number; results: number; lastAt: string }>();
+// ── Favorites API (server-side) ──────────────────────────────────
 
-export function getLocalStats(): Map<string, { scans: number; results: number; lastAt: string }> {
-  return statsStore;
+export async function fetchFavorites(): Promise<FavoriteEntry[]> {
+  const res = await fetch(`${BASE}/favorites`);
+  if (!res.ok) throw new Error('获取收藏失败');
+  return res.json();
 }
 
-export function recordScan(strategyId: string, resultCount: number): void {
-  const existing = statsStore.get(strategyId);
-  statsStore.set(strategyId, {
-    scans: (existing?.scans ?? 0) + 1,
-    results: resultCount,
-    lastAt: new Date().toISOString(),
+export async function addFavorite(stock: ScreenerResult, tags: string[] = [], note: string = ''): Promise<FavoriteEntry[]> {
+  const res = await fetch(`${BASE}/favorites`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stock, tags, note }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || '添加收藏失败');
+  }
+  return res.json();
+}
+
+export async function updateFavorite(code: string, patch: { tags?: string[]; note?: string }): Promise<FavoriteEntry> {
+  const res = await fetch(`${BASE}/favorites/${encodeURIComponent(code)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || '更新收藏失败');
+  }
+  return res.json();
+}
+
+export async function deleteFavorite(code: string): Promise<void> {
+  const res = await fetch(`${BASE}/favorites/${encodeURIComponent(code)}`, { method: 'DELETE' });
+  if (!res.ok && res.status !== 404) throw new Error('删除收藏失败');
+}
+
+export async function bulkImportFavorites(stocks: ScreenerResult[]): Promise<{ added: number; skipped: number }> {
+  const res = await fetch(`${BASE}/favorites/bulk-import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(stocks),
+  });
+  if (!res.ok) throw new Error('批量导入失败');
+  return res.json();
+}
+
+// ── History API ──────────────────────────────────────────────────
+
+export async function fetchHistory(range: HistoryRange = 'all'): Promise<HistoryDateGroup[]> {
+  const res = await fetch(`${BASE}/history?range=${encodeURIComponent(range)}`);
+  if (!res.ok) throw new Error('获取历史失败');
+  return res.json();
+}
+
+export async function fetchSnapshot(id: string): Promise<ScanSnapshot> {
+  const res = await fetch(`${BASE}/history/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error('获取快照失败');
+  return res.json();
+}
+
+export async function fetchSnapshotDiff(fromId: string, toId: string, strategyId: string): Promise<SnapshotDiff> {
+  const params = new URLSearchParams({ from: fromId, to: toId, strategyId });
+  const res = await fetch(`${BASE}/history/diff?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || '对比失败');
+  }
+  return res.json();
+}
+
+// ── Backup API ───────────────────────────────────────────────────
+
+export async function exportBackup(): Promise<BackupBundle> {
+  const res = await fetch(`${BASE}/backup/export`);
+  if (!res.ok) throw new Error('导出备份失败');
+  return res.json();
+}
+
+export async function importBackup(bundle: BackupBundle): Promise<{ historyCount: number; favoritesCount: number }> {
+  const res = await fetch(`${BASE}/backup/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bundle),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || '导入备份失败');
+  }
+  return res.json();
+}
+
+// ── Stock K-line detail (for StockDetailDialog) ──────────────────
+
+export async function fetchKLineDetail(
+  code: string,
+  period: KlinePeriod = 'daily',
+  days: number = 120,
+  signal?: AbortSignal,
+): Promise<KLine[]> {
+  const params = new URLSearchParams({ period, days: String(days) });
+  const res = await fetch(`${BASE}/market/kline/${encodeURIComponent(code)}?${params.toString()}`, { signal });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || err.error || '获取 K 线失败');
+  }
+  return res.json();
 }
