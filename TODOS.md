@@ -62,6 +62,17 @@
 - **Priority**: P2
 - **Depends on**: MVP 上线 + UI 趋于稳定（建议第 2 个 preset 落地前后再上）
 
+### T7. screener 批量"召开委员会" UI
+
+- **What**: ScannerTab 加 row 多选 + "批量召开" 按钮; 点击后弹出 Modal/Accordion 形态的 SwarmBatchPanel, 渲染 N 个 SwarmDebateCard (默认 collapsed, 显示 verdict summary line)
+- **Why**: C5 backend `POST /api/swarm/batch-runs` 已完成 (并发上限 2, 测试覆盖), 但前端 ScannerTab UI 未接入 (ScannerTab 是 571 行复杂组件, 改造工量大). 当前只能通过后端 API 调用 batch
+- **Pros**: 批量决策 5 只候选股, 横向对比 verdict; 与 screener 工作流完整闭环
+- **Cons**: ScannerTab 需要加 row selection state + Modal/Accordion 组件 + SwarmDebateCard 多实例管理
+- **Context**: design doc D4 决定走 Accordion 5 行展开形态. plan-eng-review D4 确定并发上限 2 (Anthropic Tier 1 安全). API 已就绪: `startBatchSwarm()` in lib/api.ts
+- **Effort**: M (human ~1 day / CC ~2h)
+- **Priority**: P2
+- **Depends on**: trade 单股 swarm 验证通过 (outcome validation 10 次对比)
+
 ### T5. Preset 选择器从隐藏改为暴露
 
 - **What**: C6 在 MVP 实现但 hidden（presets.length===1 时不显示）。第 2 个 preset 落地后 unhide
