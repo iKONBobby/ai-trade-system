@@ -108,6 +108,10 @@ export default function StockDetailDialog({
     window.open(`/trade?code=${code}`, '_blank');
   }, [code]);
 
+  const handleOpenSwarm = useCallback(() => {
+    window.open(`/trade?code=${code}&ai=swarm&auto=1`, '_blank');
+  }, [code]);
+
   const change = initialMeta?.change ?? 0;
   const changeColor = change >= 0 ? 'text-red-500' : 'text-green-500';
   const changeSign = change >= 0 ? '+' : '';
@@ -226,6 +230,13 @@ export default function StockDetailDialog({
               } disabled:cursor-not-allowed disabled:opacity-50`}
             >
               {isFavorited ? '★ 已收藏' : adding ? '加入中...' : '☆ 加入收藏'}
+            </button>
+            <button
+              onClick={handleOpenSwarm}
+              className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20"
+              title="召开 5 角色 AI 投资委员会"
+            >
+              🏛 AI 委员会
             </button>
             <button
               onClick={handleOpenTrade}

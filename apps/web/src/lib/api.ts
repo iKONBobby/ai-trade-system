@@ -223,6 +223,119 @@ export async function importBackup(bundle: BackupBundle): Promise<{ historyCount
   return res.json();
 }
 
+// ── Swarm engine (AI 辩论) ───────────────────────────────────────
+
+export interface SwarmStartArgs {
+  stockCode: string;
+  presetId?: string; // 默认 'investment_committee'
+  totalCapital?: number;
+  tradeMode?: 'grid' | 'condition' | 'auto';
+  isT0Mode?: boolean;
+}
+
+export interface SwarmStartResult {
+  runId: string;
+  streamUrl: string;
+}
+
+/** POST /api/swarm/runs — 启动 swarm. 返回 runId + SSE 路径 (供 useSwarmStream 订阅). */
+export async function startSwarmRun(args: SwarmStartArgs): Promise<SwarmStartResult> {
+  const res = await fetch(`${BASE}/swarm/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      stockCode: args.stockCode,
+      presetId: args.presetId ?? 'investment_committee',
+      totalCapital: args.totalCapital,
+      tradeMode: args.tradeMode,
+      isT0Mode: args.isT0Mode,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || err.error || `启动 AI 辩论失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+/** POST /api/swarm/runs/:runId/abort */
+export async function abortSwarmRun(runId: string): Promise<void> {
+  await fetch(`${BASE}/swarm/runs/${encodeURIComponent(runId)}/abort`, {
+    method: 'POST',
+  });
+}
+
+export interface SwarmRunStatus {
+  runId: string;
+  state: 'pending' | 'running' | 'done' | 'aborted' | 'error';
+  stockCode: string | null;
+  presetId: string | null;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
+/** GET /api/swarm/runs/:runId — C8 recovery 状态查询. 404 时返回 null. */
+export async function fetchSwarmRunStatus(runId: string): Promise<SwarmRunStatus | null> {
+  const res = await fetch(`${BASE}/swarm/runs/${encodeURIComponent(runId)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export interface SwarmBatchArgs {
+  stockCodes: string[]; // 上限 10
+  presetId?: string; // 默认 'investment_committee'
+  totalCapital?: number;
+  tradeMode?: 'grid' | 'condition' | 'auto';
+}
+
+export interface SwarmBatchResult {
+  batchId: string;
+  runs: { stockCode: string; runId: string; streamUrl: string }[];
+}
+
+/** POST /api/swarm/batch-runs — 批量召开 (C5, 后端 concurrency 上限 2). */
+export async function startBatchSwarm(args: SwarmBatchArgs): Promise<SwarmBatchResult> {
+  const res = await fetch(`${BASE}/swarm/batch-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      stockCodes: args.stockCodes,
+      presetId: args.presetId ?? 'investment_committee',
+      totalCapital: args.totalCapital,
+      tradeMode: args.tradeMode,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || err.error || `批量召开失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export type SwarmFeedbackDecision = 'accept' | 'reject' | 'modify';
+
+/** POST /api/swarm/runs/:runId/feedback */
+export async function submitSwarmFeedback(
+  runId: string,
+  decision: SwarmFeedbackDecision,
+  modifiedPositionPct?: number,
+): Promise<void> {
+  const body =
+    decision === 'modify'
+      ? { decision, modifiedPositionPct }
+      : { decision };
+  const res = await fetch(`${BASE}/swarm/runs/${encodeURIComponent(runId)}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok && res.status !== 409) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || err.error || `反馈记录失败 (${res.status})`);
+  }
+}
+
 // ── Stock K-line detail (for StockDetailDialog) ──────────────────
 
 export async function fetchKLineDetail(

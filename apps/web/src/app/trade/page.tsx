@@ -2,7 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AnalyzeResponse, AIAnalysisResult, IcebreakerConfig } from '@trade/shared';
-import { analyzeStock, fetchAIAnalysis } from '@/lib/api';
+import {
+  analyzeStock,
+  fetchAIAnalysis,
+  startSwarmRun,
+  submitSwarmFeedback,
+  fetchSwarmRunStatus,
+  type SwarmFeedbackDecision,
+} from '@/lib/api';
+import {
+  saveLastRun,
+  loadLastRun,
+  clearLastRun,
+  formatAge,
+  type SavedRun,
+} from '@/lib/swarm-recovery';
 import HeroBar from '@/components/trade/HeroBar';
 import InputBar, { type StrategyMode } from '@/components/trade/InputBar';
 import HistoryRail, { type HistoryItem } from '@/components/trade/HistoryRail';
@@ -11,7 +25,11 @@ import ChartCard from '@/components/trade/ChartCard';
 import IndicatorGrid from '@/components/trade/IndicatorGrid';
 import RecoPanel from '@/components/trade/RecoPanel';
 import AISummaryCard from '@/components/trade/AISummaryCard';
+import SwarmDebateCard from '@/components/trade/SwarmDebateCard';
 import ConfigPreview from '@/components/trade/ConfigPreview';
+import type { SwarmRunInfo } from '@/hooks/useSwarmStream';
+
+type AiMode = 'single' | 'swarm';
 
 function readDemoFlag(): boolean {
   if (process.env.NODE_ENV === 'production') return false;
@@ -33,6 +51,15 @@ export default function TradePage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [favorited, setFavorited] = useState(false);
   const aiAbortRef = useRef<AbortController | null>(null);
+
+  // ── Swarm (AI 辩论) state ─────────────────────────────────
+  const [aiMode, setAiMode] = useState<AiMode>('single');
+  const [swarmRunInfo, setSwarmRunInfo] = useState<SwarmRunInfo | null>(null);
+  const [swarmStarting, setSwarmStarting] = useState(false);
+  const [swarmError, setSwarmError] = useState<string | null>(null);
+  const [feedbackSent, setFeedbackSent] = useState<SwarmFeedbackDecision | null>(null);
+  const [recoverable, setRecoverable] = useState<SavedRun | null>(null);
+  const autoStartPendingRef = useRef(false);
 
   // Dev preview: ?demo=ai-loading forces a stubbed analysis + AI loading state
   // so the AI-loading visual can be reviewed without hitting the upstream API.
@@ -110,6 +137,50 @@ export default function TradePage() {
     [useAI, capital, isT0],
   );
 
+  // 启动 swarm (用户主动调用)
+  const handleStartSwarm = useCallback(async () => {
+    if (!data) return;
+    setSwarmError(null);
+    setFeedbackSent(null);
+    setSwarmStarting(true);
+    try {
+      const info = await startSwarmRun({
+        stockCode: data.market.code,
+        totalCapital: Number(capital) || 100000,
+        tradeMode: mode,
+        isT0Mode: isT0,
+      });
+      setSwarmRunInfo(info);
+      // C8: 记 last-run 用于刷新后恢复
+      saveLastRun({
+        runId: info.runId,
+        streamUrl: info.streamUrl,
+        stockCode: data.market.code,
+      });
+      setRecoverable(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '启动失败';
+      setSwarmError(msg);
+      setSwarmRunInfo(null);
+    } finally {
+      setSwarmStarting(false);
+    }
+  }, [data, capital, mode, isT0]);
+
+  // Feedback submit
+  const handleSwarmFeedback = useCallback(
+    async (decision: SwarmFeedbackDecision, modifiedPct?: number) => {
+      if (!swarmRunInfo || feedbackSent) return;
+      try {
+        await submitSwarmFeedback(swarmRunInfo.runId, decision, modifiedPct);
+        setFeedbackSent(decision);
+      } catch {
+        // 静默 fail (生产中可加 toast)
+      }
+    },
+    [swarmRunInfo, feedbackSent],
+  );
+
   const handleSearch = useCallback(
     async (code: string) => {
       setLoading(true);
@@ -118,6 +189,10 @@ export default function TradePage() {
       setAiResult(null);
       setAdjustedConfig(null);
       setFavorited(false);
+      // 换股票时 reset swarm
+      setSwarmRunInfo(null);
+      setSwarmError(null);
+      setFeedbackSent(null);
       try {
         const result = await analyzeStock({
           stockCode: code,
@@ -154,6 +229,10 @@ export default function TradePage() {
     setAiResult(null);
     setAdjustedConfig(null);
     setError(null);
+    // 切换历史项时 reset swarm
+    setSwarmRunInfo(null);
+    setSwarmError(null);
+    setFeedbackSent(null);
   }, []);
 
   // Re-run AI when the toggle flips on after a result exists
@@ -167,6 +246,68 @@ export default function TradePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useAI]);
+
+  // 读 query param: ?code=X&ai=swarm&auto=1 — StockDetailDialog "AI 委员会" 跳转入口
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const sp = new URLSearchParams(window.location.search);
+    const codeParam = sp.get('code');
+    const aiParam = sp.get('ai');
+    const autoParam = sp.get('auto');
+
+    if (aiParam === 'swarm') setAiMode('swarm');
+    if (codeParam && /^\d{6}$/.test(codeParam)) {
+      autoStartPendingRef.current = autoParam === '1' && aiParam === 'swarm';
+      void handleSearch(codeParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // data 加载 + autoStart pending → 自动启动 swarm
+  useEffect(() => {
+    if (
+      data &&
+      aiMode === 'swarm' &&
+      autoStartPendingRef.current &&
+      !swarmRunInfo &&
+      !swarmStarting
+    ) {
+      autoStartPendingRef.current = false;
+      void handleStartSwarm();
+    }
+  }, [data, aiMode, swarmRunInfo, swarmStarting, handleStartSwarm]);
+
+  // C8: mount 检查 localStorage 的上次 swarm + 验证 server 仍存活
+  useEffect(() => {
+    const saved = loadLastRun();
+    if (!saved) return;
+    let cancelled = false;
+    void fetchSwarmRunStatus(saved.runId).then((status) => {
+      if (cancelled) return;
+      if (status) {
+        setRecoverable(saved);
+      } else {
+        clearLastRun();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 恢复 swarm
+  const handleRecoverSwarm = useCallback(() => {
+    if (!recoverable) return;
+    setAiMode('swarm');
+    setSwarmRunInfo({ runId: recoverable.runId, streamUrl: recoverable.streamUrl });
+    setRecoverable(null);
+    setFeedbackSent(null);
+  }, [recoverable]);
+
+  const handleDismissRecovery = useCallback(() => {
+    clearLastRun();
+    setRecoverable(null);
+  }, []);
 
   const activeConfig = adjustedConfig ?? data?.config ?? null;
 
@@ -209,6 +350,63 @@ export default function TradePage() {
         </div>
       )}
 
+      {/* C8: last-run recovery banner */}
+      {recoverable && !swarmRunInfo && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 'var(--sp-5)',
+            padding: 'var(--sp-3) var(--sp-4)',
+            background: 'var(--accent-bg)',
+            border: '1px solid var(--accent-border)',
+            borderRadius: 'var(--r-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-3)',
+            fontSize: 'var(--text-sm)',
+            color: 'var(--text-1)',
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            上次辩论 <strong>{recoverable.stockCode}</strong>{' '}
+            <span style={{ color: 'var(--text-3)' }}>· {formatAge(recoverable.savedAt)}</span>{' '}
+            可以恢复
+          </span>
+          <button
+            type="button"
+            onClick={handleRecoverSwarm}
+            style={{
+              height: 30,
+              padding: '0 var(--sp-3)',
+              background: 'var(--accent)',
+              color: '#0a0b0d',
+              border: '1px solid var(--accent-strong)',
+              borderRadius: 'var(--r-md)',
+              fontSize: 'var(--text-xs)',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            恢复
+          </button>
+          <button
+            type="button"
+            onClick={handleDismissRecovery}
+            aria-label="关闭"
+            style={{
+              width: 24,
+              height: 24,
+              background: 'transparent',
+              color: 'var(--text-3)',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div
         className="trade-split"
         style={{
@@ -232,10 +430,42 @@ export default function TradePage() {
                 stockCode={data.market.code}
               />
               {useAI && (
-                <AISummaryCard
-                  summary={aiResult?.summary ?? null}
-                  loading={aiLoading}
-                />
+                <>
+                  <AiModeToggle mode={aiMode} onChange={setAiMode} />
+                  {aiMode === 'single' && (
+                    <AISummaryCard
+                      summary={aiResult?.summary ?? null}
+                      loading={aiLoading}
+                    />
+                  )}
+                  {aiMode === 'swarm' && (
+                    <>
+                      {swarmError && (
+                        <div
+                          role="alert"
+                          style={{
+                            marginTop: 'var(--sp-4)',
+                            padding: 'var(--sp-3) var(--sp-4)',
+                            background: 'var(--danger-bg)',
+                            border: '1px solid var(--up-dim)',
+                            borderRadius: 'var(--r-md)',
+                            color: 'var(--danger)',
+                            fontSize: 'var(--text-sm)',
+                          }}
+                        >
+                          启动 AI 辩论失败: {swarmError}
+                        </div>
+                      )}
+                      <SwarmDebateCard
+                        runInfo={swarmRunInfo}
+                        stockCode={data.market.code}
+                        onStart={swarmStarting ? undefined : handleStartSwarm}
+                        onFeedback={handleSwarmFeedback}
+                        feedbackSent={feedbackSent}
+                      />
+                    </>
+                  )}
+                </>
               )}
               <ConfigPreview config={activeConfig} mode={data.analysis.recommendation} />
             </>
@@ -266,6 +496,64 @@ export default function TradePage() {
         }
       `}</style>
     </div>
+  );
+}
+
+function AiModeToggle({ mode, onChange }: { mode: AiMode; onChange: (m: AiMode) => void }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="AI 分析模式"
+      style={{
+        display: 'inline-flex',
+        gap: 0,
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border-1)',
+        borderRadius: 'var(--r-pill)',
+        padding: 2,
+        marginTop: 'var(--sp-5)',
+      }}
+    >
+      <PillButton active={mode === 'single'} onClick={() => onChange('single')}>
+        单次 · 快速
+      </PillButton>
+      <PillButton active={mode === 'swarm'} onClick={() => onChange('swarm')}>
+        辩论 · 深度
+      </PillButton>
+    </div>
+  );
+}
+
+function PillButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      style={{
+        height: 28,
+        padding: '0 var(--sp-3)',
+        borderRadius: 'var(--r-pill)',
+        background: active ? 'var(--accent)' : 'transparent',
+        color: active ? '#0a0b0d' : 'var(--text-2)',
+        border: 'none',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'all var(--motion-1) var(--ease)',
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

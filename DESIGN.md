@@ -320,7 +320,91 @@ K 线主图 + 成交量副图比 = 260 : 90。X 轴 5 个时间 tick，Y 轴价�
 
 时间范围用 `.chart-range` segmented control（分时 / 5日 / 日K / 周K / 月K），active 态 = accent 底 + 黑字。
 
-## 八、Reference
+## 八、Swarm (AI 辩论) v1, 2026-05-14
+
+新功能 "AI 投资委员会" 的视觉规范. 详细决策见 plan-design-review D2-D5
++ design doc `bobby-main-design-20260514-*.md`.
+
+### 8.1 Agent 时间线 (`SwarmAgentTimeline`)
+
+- 5 agent 垂直时间线 (移动端友好), 顺序 bull → bear → risk → pm → synthesizer
+- 每个 block: 左 3px 角色色条 + 28px 单字徽章 + 角色名 + 状态点
+- **不用 emoji** (违反 §五 AI slop 黑名单), 用单字徽章
+
+### 8.2 角色色彩 (block 左条 + 徽章)
+
+| Agent | 单字徽章 | 色彩 token | 含义 |
+|---|---|---|---|
+| bull_advocate | 多 | `--up` | 看涨 (A 股红) |
+| bear_advocate | 空 | `--down` | 看跌 (A 股绿) |
+| risk_officer | 险 | `--warning` | 风控警示 |
+| portfolio_manager | 决 | `--accent` | 决策 |
+| synthesizer | 总 | `--text-2` | 中立总结 |
+
+### 8.3 Agent 状态点
+
+| state | 色彩 | 动画 |
+|---|---|---|
+| pending | `--text-disabled` | 无 |
+| streaming | `--accent` | pulse 1.2s |
+| done | `--accent` | 无 |
+| failed | `--danger` | 无 |
+| aborted | `--text-3` | 无 |
+
+`prefers-reduced-motion: reduce` 全部禁用 pulse.
+
+### 8.4 Verdict 卡 (`SwarmVerdictCard`) — A 股本地化色
+
+| verdict | 大字色 | 含义 |
+|---|---|---|
+| `buy` | `--up` (红) | 看涨买入 (A 股惯例, **严禁用 accent 绿**) |
+| `sell` | `--down` (绿) | 看跌卖出 |
+| `hold` | `--text-2` (灰) | 中性观望 |
+| `avoid` | `--warning` (橙) | 警示规避 |
+
+**关键区分**: `--accent` (emerald) **仅**用于"操作调用色"(按钮 / 链接 / active),
+verdict 表达"情绪/方向"走 A 股 semantic 色, 不冲突.
+
+### 8.5 Score ring (verdict 卡仓位可视化)
+
+- 48×48 px SVG conic-style 进度环 (复用 §三 36×36 score ring 设计, 略放大)
+- 进度色与 verdict 同色 (buy=红 / sell=绿 / hold=灰 / avoid=橙)
+- 中心数字 `--font-num` + tabular-nums
+- 下方 label "建议仓位"
+
+### 8.6 Feedback 三按钮 (verdict 卡底部)
+
+走 §三 `.btn` 系统:
+- "采纳" → primary (accent 实底)
+- "不采纳" → ghost
+- "修改仓位" → ghost (点击弹 prompt 输入新 pct)
+- 提交后整组 `disabled`, 选中态 `aria-pressed="true"`
+
+### 8.7 5 状态 spec
+
+| state | 触发 | UI 表现 |
+|---|---|---|
+| pending → running | `swarm_started` | progress + agent 流式 + Cancel button |
+| done | `swarm_completed` | timeline + verdict 卡 + feedback |
+| partial | `swarm_completed` 但有 agent failed | timeline + verdict + warning banner "1 位失败" |
+| error | `swarm_error` | timeline + danger banner + "重新召开" |
+| aborted | `swarm_aborted` (cancel / TTL) | timeline + muted banner + "重新召开" |
+
+### 8.8 入口
+
+- trade 页面顶部 toggle: "单次 · 快速" / "辩论 · 深度" (pill segment)
+- screener 单股 dialog footer: "🏛 AI 委员会" 按钮 (跳 `/trade?code=X&ai=swarm&auto=1`)
+- C8 recovery: trade page mount 时若 localStorage 有 < 5min 的 runId 且 server 仍有 → 显示 "上次辩论 X (Y 分钟前)" banner + 恢复按钮
+
+### 8.9 A11y
+
+- timeline: `<ol role="list">` + `<li role="listitem">`
+- streaming text: `aria-live="polite"` + `aria-atomic="false"`
+- verdict 卡: `<article role="status" aria-live="polite">`
+- feedback 按钮: 选中后 `aria-pressed="true"`
+- Touch targets ≥ 36×36 (DESIGN.md §六)
+
+## 九、Reference
 
 - screener v2 mockup：`~/.gstack/projects/ai-trade-system/designs/screener-20260511/finalized.html`
 - trade v2 mockup：`~/.gstack/projects/ai-trade-system/designs/trade-20260512/finalized.html`
