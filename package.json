@@ -6,7 +6,12 @@
     "dev:server": "pnpm --filter @trade/server dev",
     "dev:web": "pnpm --filter @trade/web dev",
     "dev": "pnpm run dev:server & pnpm run dev:web",
-    "build": "pnpm --filter @trade/shared build && pnpm --filter @trade/server build && pnpm --filter @trade/web build"
+    "build": "pnpm --filter @trade/shared build && pnpm --filter @trade/server build && pnpm --filter @trade/web build",
+    "test": "pnpm --filter @trade/server test && pnpm --filter @trade/web test",
+    "test:server": "pnpm --filter @trade/server test",
+    "test:web": "pnpm --filter @trade/web test",
+    "swarm:smoke": "pnpm --filter @trade/server exec tsx scripts/test-swarm.ts",
+    "swarm:backfill": "pnpm --filter @trade/server exec tsx scripts/backfill-validation.ts"
   },
   "packageManager": "pnpm@10.13.1"
 }
