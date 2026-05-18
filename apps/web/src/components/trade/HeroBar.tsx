@@ -1,12 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
-interface MarketIndex {
-  label: string;
-  value: number;
-  changePct: number;
-}
+import type { MarketIndex } from '@trade/shared';
 
 interface HeroBarProps {
   indices?: MarketIndex[];
@@ -16,14 +11,15 @@ interface HeroBarProps {
   onSettings?: () => void;
 }
 
-const DEFAULT_INDICES: MarketIndex[] = [
-  { label: '上证指数', value: 3245.67, changePct: 0.83 },
-  { label: '深证成指', value: 9856.12, changePct: 1.15 },
-  { label: '创业板指', value: 1927.84, changePct: -0.21 },
+// 未拉到数据时的占位骨架 (label 固定, 数值显示 "—", 不显示假数字).
+const PLACEHOLDER_INDICES: MarketIndex[] = [
+  { label: '上证指数', value: 0, changePct: 0 },
+  { label: '深证成指', value: 0, changePct: 0 },
+  { label: '创业板指', value: 0, changePct: 0 },
 ];
 
 export default function HeroBar({
-  indices = DEFAULT_INDICES,
+  indices = PLACEHOLDER_INDICES,
   favorited = false,
   onToggleFavorite,
   onRefresh,
@@ -97,23 +93,34 @@ export default function HeroBar({
                 {idx.label}
               </span>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
-                <span
-                  className="num"
-                  style={{ fontSize: 'var(--text-body)', fontWeight: 600, color: 'var(--text-1)' }}
-                >
-                  {idx.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-                <span
-                  className="num"
-                  style={{
-                    fontSize: 'var(--text-xs)',
-                    fontWeight: 600,
-                    color: idx.changePct >= 0 ? 'var(--up)' : 'var(--down)',
-                  }}
-                >
-                  {idx.changePct >= 0 ? '+' : '−'}
-                  {Math.abs(idx.changePct).toFixed(2)}%
-                </span>
+                {idx.value > 0 ? (
+                  <>
+                    <span
+                      className="num"
+                      style={{ fontSize: 'var(--text-body)', fontWeight: 600, color: 'var(--text-1)' }}
+                    >
+                      {idx.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span
+                      className="num"
+                      style={{
+                        fontSize: 'var(--text-xs)',
+                        fontWeight: 600,
+                        color: idx.changePct >= 0 ? 'var(--up)' : 'var(--down)',
+                      }}
+                    >
+                      {idx.changePct >= 0 ? '+' : '−'}
+                      {Math.abs(idx.changePct).toFixed(2)}%
+                    </span>
+                  </>
+                ) : (
+                  <span
+                    className="num"
+                    style={{ fontSize: 'var(--text-body)', fontWeight: 600, color: 'var(--text-3)' }}
+                  >
+                    —
+                  </span>
+                )}
               </div>
             </div>
           ))}

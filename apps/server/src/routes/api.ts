@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { AnalyzeRequest, AnalyzeResponse, StockSearchItem, MarketData, AnalysisResult, KlinePeriod } from '@trade/shared';
 import { KLINE_PERIODS, KLINE_MINUTE_PERIODS } from '@trade/shared';
-import { fetchRealtime, fetchKLine, searchStocks, UpstreamUnavailableError } from '../services/market.js';
+import { fetchRealtime, fetchKLine, searchStocks, fetchIndices, UpstreamUnavailableError } from '../services/market.js';
 import { analyze } from '../services/analyzer.js';
 import { generateSimple, calcLots } from '../services/config-generator.js';
 import { aiAnalyze } from '../services/ai-analyzer.js';
@@ -30,6 +30,25 @@ apiRouter.get('/stock/search', async (req: Request, res: Response) => {
     }
     console.error('stock search error:', err);
     res.status(500).json({ error: 'SEARCH_ERROR', message: 'Search failed' });
+  }
+});
+
+/**
+ * GET /api/market/indices
+ * 大盘指数 (上证 / 深证成指 / 创业板指) 实时点位 + 涨跌幅.
+ * 单指数失败 fallback 到 0; 上游不可达返回 503 (前端保留上次值).
+ */
+apiRouter.get('/market/indices', async (_req: Request, res: Response) => {
+  try {
+    const indices = await fetchIndices({ retries: 1, timeoutMs: 6000 });
+    res.json(indices);
+  } catch (err: unknown) {
+    if (err instanceof UpstreamUnavailableError) {
+      res.status(503).json({ error: 'UPSTREAM_UNAVAILABLE', message: '大盘行情暂时连不上' });
+    } else {
+      console.error('indices error:', err);
+      res.status(500).json({ error: 'SERVER_ERROR', message: 'Failed to fetch indices' });
+    }
   }
 });
 

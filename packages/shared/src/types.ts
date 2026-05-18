@@ -310,6 +310,12 @@ export interface BackupBundle {
   favorites: FavoriteEntry[];
 }
 
+export interface MarketIndex {
+  label: string;
+  value: number;
+  changePct: number;
+}
+
 export const FAVORITE_TAG_LIMIT = 3;
 export const FAVORITE_NOTE_LIMIT = 200;
 export const MAX_HISTORY_ENTRIES = 365;

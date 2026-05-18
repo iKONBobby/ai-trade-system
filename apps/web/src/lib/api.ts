@@ -336,6 +336,19 @@ export async function submitSwarmFeedback(
   }
 }
 
+// ── 大盘指数 ──────────────────────────────────────────────────
+
+export async function fetchMarketIndices(
+  signal?: AbortSignal,
+): Promise<import('@trade/shared').MarketIndex[]> {
+  const res = await fetch(`${BASE}/market/indices`, { signal });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || err.error || `获取大盘指数失败 (${res.status})`);
+  }
+  return res.json();
+}
+
 // ── Stock K-line detail (for StockDetailDialog) ──────────────────
 
 export async function fetchKLineDetail(

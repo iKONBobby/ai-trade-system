@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AnalyzeResponse, AIAnalysisResult, IcebreakerConfig } from '@trade/shared';
+import type { AnalyzeResponse, AIAnalysisResult, IcebreakerConfig, MarketIndex } from '@trade/shared';
 import {
   analyzeStock,
   fetchAIAnalysis,
+  fetchMarketIndices,
   startSwarmRun,
   submitSwarmFeedback,
   fetchSwarmRunStatus,
@@ -60,6 +61,33 @@ export default function TradePage() {
   const [feedbackSent, setFeedbackSent] = useState<SwarmFeedbackDecision | null>(null);
   const [recoverable, setRecoverable] = useState<SavedRun | null>(null);
   const autoStartPendingRef = useRef(false);
+
+  // ── 大盘指数 (进页拉一次 + 30s 轮询) ──────────────────────
+  const [marketIndices, setMarketIndices] = useState<MarketIndex[] | null>(null);
+
+  // 大盘指数: 进页拉一次 + 每 30s 轮询. 拉取失败保留上次值 (不覆盖为占位).
+  useEffect(() => {
+    let cancelled = false;
+    const ctrl = new AbortController();
+
+    const poll = async () => {
+      try {
+        const idx = await fetchMarketIndices(ctrl.signal);
+        if (!cancelled) setMarketIndices(idx);
+      } catch {
+        // 保留上次值, 下个周期再试
+      }
+    };
+
+    void poll();
+    const timer = setInterval(poll, 30_000);
+
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      clearInterval(timer);
+    };
+  }, []);
 
   // Dev preview: ?demo=ai-loading forces a stubbed analysis + AI loading state
   // so the AI-loading visual can be reviewed without hitting the upstream API.
@@ -314,6 +342,7 @@ export default function TradePage() {
   return (
     <div style={{ padding: 'var(--sp-6) var(--sp-8) var(--sp-10)', maxWidth: 1280 }}>
       <HeroBar
+        indices={marketIndices ?? undefined}
         favorited={favorited}
         onToggleFavorite={() => setFavorited((v) => !v)}
         onRefresh={() => {

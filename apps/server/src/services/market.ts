@@ -1,4 +1,4 @@
-import type { MarketData, KLine, StockSearchItem } from '@trade/shared';
+import type { MarketData, KLine, StockSearchItem, MarketIndex } from '@trade/shared';
 
 /**
  * Convert A-share stock code to EastMoney market code.
@@ -207,6 +207,44 @@ export async function fetchRealtime(code: string, opts: FetchOpts = {}): Promise
     low: (d.f45 ?? 0) / 100,
     preClose: (d.f60 ?? 0) / 100,
   };
+}
+
+// ---- 大盘指数 ----
+
+const INDEX_SECIDS: { secid: string; label: string }[] = [
+  { secid: '1.000001', label: '上证指数' },
+  { secid: '0.399001', label: '深证成指' },
+  { secid: '0.399006', label: '创业板指' },
+];
+
+/**
+ * Fetch 上证 / 深证成指 / 创业板指 实时点位 + 涨跌幅.
+ * 单个指数失败时 fallback 到 {value:0, changePct:0} (前端显示 "—"),
+ * 不让一个指数挂掉拖垮整组. 全部失败也返回 3 个 fallback (不 throw).
+ */
+export async function fetchIndices(opts: FetchOpts = {}): Promise<MarketIndex[]> {
+  const results = await Promise.allSettled(
+    INDEX_SECIDS.map(async ({ secid, label }) => {
+      const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f58,f170`;
+      const res = await fetchWithRetry(url, opts);
+      if (!res.ok) throw new Error(`EastMoney index API error: ${res.status}`);
+      const json = (await res.json()) as {
+        data?: { f43?: number; f58?: string; f170?: number } | null;
+      };
+      const d = json.data;
+      if (!d || d.f43 == null) throw new Error(`INDEX_NOT_FOUND: ${secid}`);
+      return {
+        label,
+        value: (d.f43 ?? 0) / 100,
+        changePct: (d.f170 ?? 0) / 100,
+      } satisfies MarketIndex;
+    }),
+  );
+  return INDEX_SECIDS.map((cfg, i) => {
+    const r = results[i];
+    if (r.status === 'fulfilled') return r.value;
+    return { label: cfg.label, value: 0, changePct: 0 };
+  });
 }
 
 interface EastMoneyKLineResponse {
