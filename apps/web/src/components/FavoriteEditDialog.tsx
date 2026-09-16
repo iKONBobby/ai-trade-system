@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { FavoriteEntry } from '@trade/shared';
 import { FAVORITE_TAG_LIMIT, FAVORITE_NOTE_LIMIT } from '@trade/shared';
+import Modal from '@/components/ui/Modal';
+import { Button } from '@/components/ui/primitives';
 
 export default function FavoriteEditDialog({
   favorite,
@@ -18,14 +20,6 @@ export default function FavoriteEditDialog({
   const [note, setNote] = useState(favorite.note);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const addTag = () => {
     const t = tagDraft.trim();
@@ -67,35 +61,38 @@ export default function FavoriteEditDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next && !saving) onClose(); }}
+      title={favorite.stock.name}
+      description={`${favorite.stock.code} · 整理观察标签与交易备注`}
+      footer={(
+        <>
+          <Button variant="ghost" size="lg" onClick={onClose} disabled={saving}>取消</Button>
+          <Button variant="primary" size="lg" onClick={handleSave} disabled={saving}>
+            {saving ? '保存中…' : '保存'}
+          </Button>
+        </>
+      )}
+    >
+      <div className="favorite-editor">
         <div className="mb-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold">
-              {favorite.stock.name}
-              <span className="ml-2 text-xs font-normal text-[var(--color-text-secondary)]">{favorite.stock.code}</span>
-            </h3>
-            <button onClick={onClose} className="text-gray-400 hover:text-red-400">✕</button>
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <label className="mb-1 block text-xs text-[var(--color-text-secondary)]">
+          <label htmlFor="favorite-tag" className="mb-1 block text-xs text-[var(--color-text-secondary)]">
             标签 ({tags.length}/{FAVORITE_TAG_LIMIT})
           </label>
           <div className="mb-2 flex flex-wrap gap-1.5">
             {tags.map((t) => (
               <span key={t} className="flex items-center gap-1 rounded-full bg-[var(--color-primary)]/10 px-2 py-0.5 text-xs text-[var(--color-primary)]">
                 {t}
-                <button onClick={() => removeTag(t)} className="text-[var(--color-primary)]/60 hover:text-red-400">✕</button>
+                <button type="button" onClick={() => removeTag(t)} aria-label={`移除标签：${t}`} className="favorite-editor__remove">
+                  <span aria-hidden="true">×</span>
+                </button>
               </span>
             ))}
           </div>
           <div className="flex gap-2">
             <input
+              id="favorite-tag"
               value={tagDraft}
               onChange={(e) => setTagDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -119,13 +116,14 @@ export default function FavoriteEditDialog({
         </div>
 
         <div className="mb-4">
-          <label className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-secondary)]">
+          <label htmlFor="favorite-note" className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-secondary)]">
             备注
             <span className={note.length > FAVORITE_NOTE_LIMIT ? 'text-red-400' : ''}>
               {note.length}/{FAVORITE_NOTE_LIMIT}
             </span>
           </label>
           <textarea
+            id="favorite-note"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
@@ -140,22 +138,7 @@ export default function FavoriteEditDialog({
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {saving ? '保存中...' : '保存'}
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

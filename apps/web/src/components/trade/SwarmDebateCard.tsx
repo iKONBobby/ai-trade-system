@@ -147,7 +147,7 @@ function IdleState({ stockCode, onStart }: { stockCode?: string; onStart?: () =>
           padding: '0 var(--sp-4)',
           borderRadius: 'var(--r-md)',
           background: 'var(--accent)',
-          color: '#0a0b0d',
+          color: 'var(--accent-foreground)',
           border: '1px solid var(--accent-strong)',
           fontWeight: 500,
           cursor: onStart ? 'pointer' : 'not-allowed',
@@ -193,12 +193,12 @@ function Header({
           width: 22,
           height: 22,
           borderRadius: 'var(--r-sm)',
-          background: 'linear-gradient(135deg, var(--info), var(--accent))',
+          background: 'var(--accent)',
           display: 'grid',
           placeItems: 'center',
           fontSize: 10,
           fontWeight: 700,
-          color: '#0a0b0d',
+          color: 'var(--accent-foreground)',
         }}
       >
         AI

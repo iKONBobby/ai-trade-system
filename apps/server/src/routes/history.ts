@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { HistoryRange } from '@trade/shared';
 import { getPersistence } from '../services/persistence-container.js';
+import { reviewScanSnapshot } from '../services/screener/engine.js';
 
 export const historyRouter: Router = Router();
 
@@ -41,6 +42,35 @@ historyRouter.get('/diff', async (req: Request, res: Response) => {
   } catch (err: unknown) {
     console.error('[HISTORY:DIFF] error:', err);
     res.status(500).json({ error: 'SERVER_ERROR', message: 'Failed to compute diff' });
+  }
+});
+
+/** POST /api/history/:id/ai-review — add AI review to a completed snapshot. */
+historyRouter.post('/:id/ai-review', async (req: Request, res: Response) => {
+  try {
+    const snapshotId = String(req.params.id);
+    if (!/^job_[a-z0-9_-]+$/i.test(snapshotId)) {
+      res.status(400).json({ error: 'INVALID_SNAPSHOT_ID', message: 'Invalid snapshot id' });
+      return;
+    }
+    const snapshot = await reviewScanSnapshot(snapshotId);
+    if (!snapshot) {
+      res.status(404).json({ error: 'SNAPSHOT_NOT_FOUND', message: 'Snapshot not found or expired' });
+      return;
+    }
+    res.json(snapshot);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : '';
+    if (message === 'AI_REVIEW_RUNNING') {
+      res.status(409).json({ error: 'AI_REVIEW_RUNNING', message: '该快照正在进行 AI 复核' });
+      return;
+    }
+    if (message === 'SCAN_NOT_COMPLETED') {
+      res.status(409).json({ error: 'SCAN_NOT_COMPLETED', message: '请等待规则扫描完成后再进行 AI 复核' });
+      return;
+    }
+    console.error('[HISTORY:AI_REVIEW] error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR', message: 'Failed to review snapshot' });
   }
 });
 

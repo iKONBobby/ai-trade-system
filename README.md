@@ -4,7 +4,7 @@
 
 ## 功能
 
-- **实时行情**: 接入东方财富 API，获取 A 股实时价格、涨跌幅、成交量、换手率
+- **实时行情**: 支持“自动 / 东方财富 / 腾讯财经 / 同花顺”切换；配置同花顺 Key 后，自动模式会在免费源均失败时使用官方接口兜底
 - **智能分析**: 规则引擎计算布林带、ATR、均线、支撑阻力位，自动判断市场状态
 - **策略推荐**: 震荡市推荐网格交易，趋势市推荐条件单，带置信度评分
 - **做T模式**: 支持半仓底仓 + 半仓做T的仓位管理
@@ -13,24 +13,25 @@
   - **辩论模式** (swarm, v1): 5 角色 AI 投资委员会流式辩论 (看多 / 看空 / 风控 / PM / 总结)，
     A 股本地化色 + verdict 卡 + 用户反馈记录。详见 [docs/designs/](docs/designs/)
 - **智能选股** (screener): 全市场扫描 + 因子引擎 + 历史回看 + 收藏
+  - 扫描前可开启 AI 复核；忘记开启时，也可在结果页或任意历史快照中补做，结果会写回历史记录
 - **配置生成**: 输出破冰号交易终端格式的配置文件，支持简洁/完整两种模式，一键下载 .txt
 
 ## 技术栈
 
-| 层 | 技术 |
-|---|------|
+| 层   | 技术                                     |
+| ---- | ---------------------------------------- |
 | 前端 | Next.js 15 + TypeScript + Tailwind CSS 4 |
-| 后端 | Express + TypeScript |
-| 共享 | pnpm workspace + 共享类型包 |
-| 数据 | 东方财富免费 API |
-| AI | Claude API (可选) |
+| 后端 | Express + TypeScript                     |
+| 共享 | pnpm workspace + 共享类型包              |
+| 数据 | 同花顺官方 / Tushare / BaoStock / 东方财富 / 腾讯财经 |
+| AI   | Claude API (可选)                        |
 
 ## 项目结构
 
 ```
 ai-trade-system/
 ├── apps/
-│   ├── server/              # Express 后端 (端口 4001)
+│   ├── server/              # Express 后端 (端口 3001)
 │   │   ├── data/                    # 运行时数据 (gitignored, favorites/history/feedback)
 │   │   ├── scripts/
 │   │   │   ├── test-swarm.ts        # swarm 端到端 smoke
@@ -45,7 +46,9 @@ ai-trade-system/
 │   │       │   ├── backup.ts             # 备份导入导出
 │   │       │   └── swarm.ts              # AI 辩论 (5 endpoint + SSE)
 │   │       ├── services/
-│   │       │   ├── market.ts             # 东方财富行情
+│   │       │   ├── market.ts             # 多行情源路由及降级
+│   │       │   ├── hithink-market.ts     # 同花顺官方 REST 行情适配器
+│   │       │   ├── baostock-market.ts    # BaoStock 历史日线备用源
 │   │       │   ├── analyzer.ts           # 规则引擎
 │   │       │   ├── ai-analyzer.ts        # AI single 模式
 │   │       │   ├── config-generator.ts   # 破冰号配置
@@ -82,6 +85,7 @@ ai-trade-system/
 │               └── swarm-recovery.ts     # ★ localStorage TTL 5min recovery
 ├── packages/shared/         # 共享 TypeScript 类型 (含 swarm-types.ts)
 ├── docs/designs/            # 设计文档 (screener / stock-detail / swarm)
+├── FRONTEND_GUIDELINES.md    # 前端交互 / A11y / 响应式统一规范
 ├── DESIGN.md                # 设计系统 token (含 §八 swarm 规范)
 └── TODOS.md                 # v1.1+ follow-up 清单
 ```
@@ -102,7 +106,7 @@ pnpm install
 
 ### 启动
 
-**后端** (端口 4001):
+**后端** (端口 3001):
 
 ```bash
 pnpm dev:server
@@ -134,6 +138,35 @@ LLM_MODEL=claude-sonnet-4-5-20250929                # 可选
 
 不设置则自动跳过 AI，仅使用规则引擎 + 选股 + 备份等功能。
 
+### 稳定行情源（推荐）
+
+如需启用同花顺官方行情，在[同花顺金融数据服务](https://fuyao.aicubes.cn/admin/)创建 API Key，并写入 `apps/server/.env`：
+
+```bash
+HITHINK_FINANCE_API_KEY=你的_api_key
+# HITHINK_FINANCE_BASE_URL=https://fuyao.aicubes.cn  # 可选
+```
+
+配置后可在前端手动选择“同花顺”。自动模式保持现有免费源优先级，在东方财富和腾讯财经均不可用或缺失时由同花顺补齐。官方快照只返回成交额、不返回换手率，因此界面会把该字段明确显示为“—”，选股也不会把成交额误当成换手率。日 K 在 Tushare、BaoStock 不可用时使用同花顺未复权日线，再降级到东方财富；分钟 K 仍由东方财富提供。
+
+在 [Tushare Pro](https://tushare.pro/) 注册并完善资料取得免费基础权限后，把个人 Token 写入 `apps/server/.env`：
+
+```bash
+TUSHARE_TOKEN=你的_token
+TUSHARE_CALLS_PER_MINUTE=45  # 可选；免费基础权限建议保留默认值
+```
+
+安装免费的 BaoStock 历史备用源（项目默认从该虚拟环境查找 Python）：
+
+```bash
+python3 -m venv apps/server/.venv
+apps/server/.venv/bin/pip install -r apps/server/requirements-market.txt
+```
+
+日K按 `Tushare → BaoStock → 同花顺（未复权）→ 东方财富` 自动降级，并缓存在 `apps/server/data/market-cache/`。全市场选股的历史数据优先按交易日批量同步 Tushare；为避免逐股调用 Python 或认证 API，扫描器的批量历史兜底直接使用东方财富，个股详情和综合分析才会使用 BaoStock 或同花顺。
+
+盘中个股行情可在前端切换 `自动 / 东方财富 / 腾讯财经 / 同花顺`。自动模式依次使用东方财富、腾讯财经和已配置的同花顺；手动模式严格使用所选来源，便于比较和应急切换。
+
 ### 跑 swarm smoke 端到端 (首次使用必跑一次)
 
 ```bash
@@ -159,10 +192,10 @@ pnpm swarm:backfill --write  # 实际写回 docs/validation/*.md 5d_direction �
 ### 实时行情
 
 ```
-GET /api/market/realtime/:code
+GET /api/market/realtime/:code?source=auto|eastmoney|tencent|hithink
 ```
 
-示例: `GET /api/market/realtime/600519`
+示例: `GET /api/market/realtime/600519?source=tencent`
 
 ### 历史 K 线
 
@@ -215,6 +248,10 @@ POST /api/screener/run            body: { strategyIds[], market?, includeGEM?, i
 GET  /api/screener/progress/:jobId
 DELETE /api/screener/jobs/:jobId
 ```
+
+`POST /api/screener/run` 还支持 `useAIReview: true`：规则扫描完成后，模型会对每个策略的量化前 20 名做结构化复核，并以 75% 量化分 + 25% AI 分生成综合排序。模型不可用时自动保留量化结果。
+
+内置策略按周期分为短线、中线、长线。`涨停次日观察` 是唯一默认保留当前涨停股的策略；其余策略继续排除涨跌停。长周期价格策略使用 260 日行情，暂不把缺失的基本面数据伪装成“质量因子”。
 
 ## 免责声明
 

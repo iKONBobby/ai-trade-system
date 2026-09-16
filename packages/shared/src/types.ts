@@ -1,14 +1,26 @@
+export type RealtimeMarketSource = 'eastmoney' | 'tencent' | 'hithink';
+export type RealtimeSourcePreference = 'auto' | RealtimeMarketSource;
+
 export interface MarketData {
   code: string;
   name: string;
   price: number;
   change: number;
   volume: number;
+  /** Turnover rate in percent. Zero is a placeholder when turnoverAvailable is false. */
   turnover: number;
+  /** False when the provider exposes turnover amount but not turnover rate. */
+  turnoverAvailable?: boolean;
+  /** Traded amount in CNY when the provider exposes it separately. */
+  turnoverAmount?: number;
   open: number;
   high: number;
   low: number;
   preClose: number;
+  /** Actual realtime quote provider used for this response. */
+  source?: RealtimeMarketSource;
+  /** Provider snapshot timestamp in Unix milliseconds, when available. */
+  quoteTimestamp?: number | null;
 }
 
 export interface KLine {
@@ -124,6 +136,7 @@ export interface AnalyzeRequest {
   mode: 'auto' | 'grid' | 'condition';
   isT0Mode: boolean;
   useAI: boolean;
+  realtimeSource?: RealtimeSourcePreference;
 }
 
 export interface AnalyzeResponse {
@@ -170,6 +183,12 @@ export interface Strategy {
   description: string;
   factors: StrategyFactor[];
   minScore: number;
+  /** Intended holding/decision horizon shown in the screener UI. */
+  horizon?: 'short' | 'medium' | 'long';
+  /** Number of daily bars required by the strategy. Defaults to 60. */
+  lookbackDays?: number;
+  /** Whether stocks currently trading at their upper price limit may enter. */
+  includeLimitUp?: boolean;
 }
 
 export interface TriggeredFactor {
@@ -191,7 +210,18 @@ export interface ScreenerResult {
   preClose: number;
   volume: number;
   turnover: number;
+  turnoverAvailable?: boolean;
+  turnoverAmount?: number;
   score: number;
+  /** Original deterministic strategy score. Present after AI re-ranking. */
+  quantScore?: number;
+  /** Grounded LLM review for this candidate. */
+  aiReview?: {
+    score: number;
+    confidence: number;
+    thesis: string;
+    risks: string[];
+  };
   triggeredFactors: TriggeredFactor[];
   klineSnapshot: number[]; // 最近 20 天收盘价，用于 sparkline
 }
@@ -199,11 +229,17 @@ export interface ScreenerResult {
 
 export interface JobProgress {
   status: 'running' | 'done' | 'error' | 'cancelled';
-  progress: { scanned: number; total: number };
+  progress: { scanned: number; total: number; failed: number };
+  /** Results for every requested strategy. `results` remains for older clients. */
+  resultsByStrategy?: Record<string, ScreenerResult[]>;
   results?: ScreenerResult[];
   strategyId: string;
   startedAt: string;
   error?: string;
+  phase?: 'market_sync' | 'scanning' | 'ai_review';
+  aiReviewStatus?: 'not_requested' | 'running' | 'done' | 'unavailable';
+  aiReviewError?: string;
+  aiReviewedAt?: string;
 }
 
 export interface ScreenerRunRequest {
@@ -213,6 +249,10 @@ export interface ScreenerRunRequest {
   includeGEM?: boolean;
   /** 包含科创板（688xxx，沪市）。默认 false。 */
   includeSTAR?: boolean;
+  /** Re-rank the quantitative shortlist with a grounded LLM review. */
+  useAIReview?: boolean;
+  /** Realtime quote source. Auto uses EastMoney, Tencent, then configured HiThink fallback. */
+  realtimeSource?: RealtimeSourcePreference;
 }
 
 /** Code prefix → board membership check. */
@@ -264,6 +304,9 @@ export interface ScanSnapshot {
   marketFilter: 'all' | 'sh' | 'sz' | 'hs300';
   durationMs: number;
   results: Record<string, ScreenerResult[]>;
+  aiReviewStatus?: 'not_requested' | 'done' | 'unavailable';
+  aiReviewError?: string;
+  aiReviewedAt?: string;
 }
 
 export interface ScanSnapshotMeta {
@@ -273,6 +316,8 @@ export interface ScanSnapshotMeta {
   strategyIds: string[];
   marketFilter: 'all' | 'sh' | 'sz' | 'hs300';
   totalResults: number;
+  aiReviewStatus?: 'not_requested' | 'done' | 'unavailable';
+  aiReviewedAt?: string;
 }
 
 export type HistoryRange = 'today' | '7d' | '30d' | 'all';

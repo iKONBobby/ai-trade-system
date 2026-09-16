@@ -70,14 +70,14 @@ export default function AISummaryCard({ summary, loading }: AISummaryCardProps) 
             width: 20,
             height: 20,
             borderRadius: 'var(--r-sm)',
-            background: 'linear-gradient(135deg, var(--info), var(--accent))',
+              background: 'var(--accent)',
             display: 'grid',
             placeItems: 'center',
             fontSize: 10,
             fontWeight: 700,
-            color: '#0a0b0d',
+            color: 'var(--accent-foreground)',
             animation: loading ? 'ai-icon-pulse 1.6s ease-in-out infinite' : 'none',
-            boxShadow: loading ? '0 0 0 0 rgba(16, 185, 129, 0.6)' : 'none',
+            boxShadow: loading ? '0 0 0 0 var(--accent-border)' : 'none',
           }}
         >
           AI

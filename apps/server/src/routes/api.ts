@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
-import type { AnalyzeRequest, AnalyzeResponse, StockSearchItem, MarketData, AnalysisResult, KlinePeriod } from '@trade/shared';
+import type { AnalyzeRequest, AnalyzeResponse, StockSearchItem, MarketData, AnalysisResult, KlinePeriod, RealtimeSourcePreference } from '@trade/shared';
 import { KLINE_PERIODS, KLINE_MINUTE_PERIODS } from '@trade/shared';
-import { fetchRealtime, fetchKLine, searchStocks, fetchIndices, UpstreamUnavailableError } from '../services/market.js';
+import { fetchRealtimeFromSource, fetchKLine, searchStocks, fetchIndices, UpstreamUnavailableError } from '../services/market.js';
 import { analyze } from '../services/analyzer.js';
 import { generateSimple, calcLots } from '../services/config-generator.js';
 import { aiAnalyze } from '../services/ai-analyzer.js';
@@ -65,7 +65,12 @@ apiRouter.get('/market/realtime/:code', async (req: Request, res: Response) => {
       return;
     }
 
-    const data = await fetchRealtime(code, { retries: 2, timeoutMs: 8000 });
+    const source = String(req.query.source ?? 'auto') as RealtimeSourcePreference;
+    if (!['auto', 'eastmoney', 'tencent', 'hithink'].includes(source)) {
+      res.status(400).json({ error: 'INVALID_SOURCE', message: 'source must be auto, eastmoney, tencent, or hithink' });
+      return;
+    }
+    const data = await fetchRealtimeFromSource(code, source, { retries: 2, timeoutMs: 8000 });
     res.json(data);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
@@ -150,7 +155,7 @@ apiRouter.get('/market/kline/:code', async (req: Request, res: Response) => {
 apiRouter.post('/analyze', async (req: Request, res: Response) => {
   try {
     const body = req.body as AnalyzeRequest;
-    const { stockCode, totalCapital, mode, isT0Mode, useAI } = body;
+    const { stockCode, totalCapital, mode, isT0Mode, useAI, realtimeSource = 'auto' } = body;
 
     // Validate stock code
     if (!stockCode || !/^\d{6}$/.test(stockCode)) {
@@ -164,9 +169,14 @@ apiRouter.post('/analyze', async (req: Request, res: Response) => {
       return;
     }
 
+    if (!['auto', 'eastmoney', 'tencent', 'hithink'].includes(realtimeSource)) {
+      res.status(400).json({ error: 'INVALID_SOURCE', message: 'realtimeSource must be auto, eastmoney, tencent, or hithink' });
+      return;
+    }
+
     // Fetch market and kline in parallel — retry twice on transient network failures
     const [market, klines] = await Promise.all([
-      fetchRealtime(stockCode, { retries: 2, timeoutMs: 8000 }),
+      fetchRealtimeFromSource(stockCode, realtimeSource, { retries: 2, timeoutMs: 8000 }),
       fetchKLine(stockCode, 60, { retries: 2, timeoutMs: 8000 }),
     ]);
 

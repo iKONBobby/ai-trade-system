@@ -45,7 +45,7 @@ export default function RecoPanel({ analysis, config, stockCode }: RecoPanelProp
   return (
     <div
       style={{
-        background: 'linear-gradient(135deg, var(--accent-bg), transparent 60%)',
+        background: 'var(--accent-bg)',
         border: '1px solid var(--accent-border)',
         borderRadius: 'var(--r-lg)',
         padding: 'var(--sp-5)',
@@ -171,7 +171,7 @@ function PrimaryBtn({ children, onClick }: { children: React.ReactNode; onClick?
         padding: '0 var(--sp-4)',
         background: 'var(--accent)',
         border: '1px solid var(--accent)',
-        color: '#0a0b0d',
+        color: 'var(--accent-foreground)',
         borderRadius: 'var(--r-md)',
         fontFamily: 'inherit',
         fontSize: 'var(--text-body)',

@@ -1,5 +1,6 @@
 node_modules
 .next
+.next-dev
 dist
 *.tsbuildinfo
 .claude/
@@ -7,3 +8,5 @@ dist
 .env.local
 .gstack/
 docs/validation/
+apps/server/data/market-cache/
+apps/server/.venv/

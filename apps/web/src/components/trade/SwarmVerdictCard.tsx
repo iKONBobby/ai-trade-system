@@ -8,12 +8,56 @@
 //   hold  → --text-2 (中性灰)
 //   avoid → --warning (#f59e0b 橙)
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   PortfolioManagerOutput,
   SwarmVerdictCode,
   SynthesizerOutput,
 } from '@trade/shared';
+
+// ---- prefers-reduced-motion (SSR 安全) ----
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') {
+      setReduced(true);
+      return;
+    }
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduced(mq.matches);
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
+
+// ---- 数字 count-up: 0 → target, ~650ms ease-out ----
+
+function useCountUp(target: number, animate: boolean): number {
+  const [val, setVal] = useState(animate ? 0 : target);
+  const rafRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!animate) {
+      setVal(target);
+      return;
+    }
+    const dur = 650;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / dur);
+      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+      setVal(Math.round(target * eased));
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [target, animate]);
+  return val;
+}
 
 const VERDICT_COLOR: Record<SwarmVerdictCode, string> = {
   buy: 'var(--up)',
@@ -58,20 +102,53 @@ export default function SwarmVerdictCard({
   const color = VERDICT_COLOR[verdict.verdict];
   const label = VERDICT_LABEL[verdict.verdict];
   const dur = useMemo(() => formatDuration(durationMs), [durationMs]);
+  const reduced = usePrefersReducedMotion();
+  const animate = !reduced;
+  const confidenceNum = useCountUp(verdict.confidence, animate);
 
   return (
     <article
       data-testid="swarm-verdict-card"
       role="status"
       aria-live="polite"
+      aria-label={`AI 投资委员会决策 ${label}, 置信度 ${verdict.confidence}%, 建议仓位 ${verdict.position_size_pct}%`}
       style={{
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
         padding: 'var(--sp-5)',
         marginTop: 'var(--sp-4)',
+        animation: animate ? 'swarm-verdict-in 0.32s ease-out' : 'none',
       }}
     >
+      <style jsx global>{`
+        @keyframes swarm-verdict-in {
+          from {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes swarm-thesis-in {
+          from {
+            opacity: 0;
+            transform: translateX(-4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [data-testid='swarm-verdict-card'],
+          [data-testid='swarm-verdict-card'] * {
+            animation: none !important;
+          }
+        }
+      `}</style>
       {/* 顶栏 */}
       <div
         style={{
@@ -130,10 +207,14 @@ export default function SwarmVerdictCard({
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            置信度 {verdict.confidence}%
+            置信度 {confidenceNum}%
           </div>
         </div>
-        <ScoreRing pct={verdict.position_size_pct} color={color} />
+        <ScoreRing
+          pct={verdict.position_size_pct}
+          color={color}
+          animate={animate}
+        />
       </div>
 
       {/* 三论点行 */}
@@ -142,12 +223,14 @@ export default function SwarmVerdictCard({
           label="核心论点"
           text={verdict.key_thesis}
           stripeColor="var(--up)"
+          delayMs={animate ? 80 : 0}
         />
         {verdict.risks.length > 0 && (
           <ThesisRow
             label="主要风险"
             text={verdict.risks.join('; ')}
             stripeColor="var(--warning)"
+            delayMs={animate ? 200 : 0}
           />
         )}
         {synthesis && synthesis.disagreements.length > 0 && (
@@ -155,6 +238,7 @@ export default function SwarmVerdictCard({
             label="主要分歧"
             text={synthesis.disagreements.join('; ')}
             stripeColor="var(--text-2)"
+            delayMs={animate ? 320 : 0}
           />
         )}
         {synthesis && synthesis.missing_info.length > 0 && (
@@ -162,6 +246,7 @@ export default function SwarmVerdictCard({
             label="缺失信息"
             text={synthesis.missing_info.join('; ')}
             stripeColor="var(--info)"
+            delayMs={animate ? 440 : 0}
           />
         )}
       </div>
@@ -228,11 +313,20 @@ export default function SwarmVerdictCard({
 
 // ---- ScoreRing (36x36 SVG conic-style 进度环) ----
 
-function ScoreRing({ pct, color }: { pct: number; color: string }) {
+function ScoreRing({
+  pct,
+  color,
+  animate,
+}: {
+  pct: number;
+  color: string;
+  animate: boolean;
+}) {
   const clamped = Math.max(0, Math.min(100, pct));
+  const shown = useCountUp(clamped, animate);
   const r = 15;
   const circumference = 2 * Math.PI * r;
-  const dashed = (clamped / 100) * circumference;
+  const dashed = (shown / 100) * circumference;
   return (
     <div
       data-testid="swarm-score-ring"
@@ -273,7 +367,7 @@ function ScoreRing({ pct, color }: { pct: number; color: string }) {
           fontFamily="var(--font-num)"
           fontWeight="600"
         >
-          {clamped}%
+          {shown}%
         </text>
       </svg>
       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-3)' }}>建议仓位</span>
@@ -283,7 +377,17 @@ function ScoreRing({ pct, color }: { pct: number; color: string }) {
 
 // ---- ThesisRow (左 3px 色条 + label + text) ----
 
-function ThesisRow({ label, text, stripeColor }: { label: string; text: string; stripeColor: string }) {
+function ThesisRow({
+  label,
+  text,
+  stripeColor,
+  delayMs = 0,
+}: {
+  label: string;
+  text: string;
+  stripeColor: string;
+  delayMs?: number;
+}) {
   return (
     <div
       style={{
@@ -293,6 +397,9 @@ function ThesisRow({ label, text, stripeColor }: { label: string; text: string; 
         position: 'relative',
         fontSize: 'var(--text-sm)',
         lineHeight: 1.6,
+        animation: delayMs
+          ? `swarm-thesis-in 0.3s ease-out ${delayMs}ms both`
+          : 'none',
       }}
     >
       <span
@@ -340,13 +447,13 @@ function FeedbackButton({
   const selectedStyle = selected
     ? {
         background: 'var(--accent)',
-        color: '#0a0b0d',
+        color: 'var(--accent-foreground)',
         border: '1px solid var(--accent-strong)',
       }
     : primary
       ? {
           background: 'var(--accent)',
-          color: '#0a0b0d',
+          color: 'var(--accent-foreground)',
           border: '1px solid var(--accent-strong)',
         }
       : {

@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import type { KlinePeriod, ScreenerResult } from '@trade/shared';
 import { useKLineData } from '@/hooks/useKLineData';
 import { addFavorite } from '@/lib/api';
 import KLineChart from './KLineChart';
+import Modal from './ui/Modal';
+import { Button, Icon } from './ui/primitives';
 
 const PERIODS: { value: KlinePeriod; label: string }[] = [
   { value: 'daily', label: '日 K' },
@@ -34,6 +36,7 @@ export interface StockDetailDialogProps {
     price?: number;
     change?: number;
     turnover?: number;
+    turnoverAvailable?: boolean;
     high?: number;
     low?: number;
   };
@@ -62,15 +65,6 @@ export default function StockDetailDialog({
 
   const { data, status, error, refetch } = useKLineData(code, period, DAYS_PER_PERIOD[period]);
 
-  // ESC to close
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const handleAddFavorite = useCallback(async () => {
     if (!initialMeta || initialMeta.price === undefined) {
       setActionError('缺少行情信息，无法加入收藏');
@@ -91,6 +85,7 @@ export default function StockDetailDialog({
         preClose: 0,
         volume: 0,
         turnover: initialMeta.turnover ?? 0,
+        turnoverAvailable: initialMeta.turnoverAvailable,
         score: 0,
         triggeredFactors: [],
         klineSnapshot: data.slice(-20).map((k) => k.close),
@@ -113,63 +108,54 @@ export default function StockDetailDialog({
   }, [code]);
 
   const change = initialMeta?.change ?? 0;
-  const changeColor = change >= 0 ? 'text-red-500' : 'text-green-500';
+  const changeColor = change >= 0 ? 'tone-bullish' : 'tone-bearish';
   const changeSign = change >= 0 ? '+' : '';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      size="xl"
+      title={initialMeta?.name ?? code}
+      description={`${code}${initialMeta?.market ? ` · ${initialMeta.market}` : ''} · 行情快照与多周期 K 线`}
+      footer={(
+        <>
+          <div className="text-xs text-[var(--danger)]" role={actionError ? 'alert' : undefined}>{actionError}</div>
+          <Button variant="ghost" size="lg" onClick={handleAddFavorite} disabled={adding || isFavorited}>
+            <Icon name="star" size={16} />
+            {isFavorited ? '已收藏' : adding ? '加入中…' : '加入收藏'}
+          </Button>
+          <Button variant="secondary" size="lg" onClick={handleOpenSwarm} title="召开 5 角色 AI 投资委员会">
+            <Icon name="chart" size={16} /> AI 委员会
+          </Button>
+          <Button variant="primary" size="lg" onClick={handleOpenTrade}>
+            查看完整分析 <Icon name="arrow-up-right" size={16} />
+          </Button>
+        </>
+      )}
     >
-      <div
-        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between border-b border-[var(--color-border)] px-5 py-4">
-          <div>
-            <h2 className="text-lg font-semibold">
-              {initialMeta?.name ?? code}
-              <span className="ml-2 text-xs font-normal text-[var(--color-text-secondary)]">
-                {code} · {initialMeta?.market ?? ''}
-              </span>
-            </h2>
-            <div className="mt-1 flex items-baseline gap-3 text-sm tabular-nums">
-              {initialMeta?.price !== undefined && (
-                <span className="text-lg font-bold">{initialMeta.price.toFixed(2)}</span>
-              )}
-              <span className={`${changeColor} font-medium`}>
-                {changeSign}
-                {change.toFixed(2)}%
-              </span>
-              {initialMeta?.turnover !== undefined && (
-                <span className="text-xs text-[var(--color-text-secondary)]">
-                  换手 {initialMeta.turnover.toFixed(2)}%
-                </span>
-              )}
-              {initialMeta?.high !== undefined && initialMeta?.low !== undefined && (
-                <span className="text-xs text-[var(--color-text-secondary)]">
-                  今 {initialMeta.high.toFixed(2)} / {initialMeta.low.toFixed(2)}
-                </span>
-              )}
-            </div>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-red-400" title="关闭 (ESC)">
-            ✕
-          </button>
-        </div>
+      <div className="stock-dialog__quote num">
+        {initialMeta?.price !== undefined && <strong>{initialMeta.price.toFixed(2)}</strong>}
+        <span className={changeColor}>{changeSign}{change.toFixed(2)}%</span>
+        {initialMeta?.turnover !== undefined && (
+          <span>换手 {initialMeta.turnoverAvailable === false ? '—' : `${initialMeta.turnover.toFixed(2)}%`}</span>
+        )}
+        {initialMeta?.high !== undefined && initialMeta?.low !== undefined && (
+          <span>今日高 / 低 {initialMeta.high.toFixed(2)} / {initialMeta.low.toFixed(2)}</span>
+        )}
+      </div>
 
-        {/* Period control + MA toggle */}
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-2">
+        <div className="stock-dialog__toolbar">
           <div className="flex gap-1">
             {PERIODS.map((p) => (
               <button
                 key={p.value}
                 onClick={() => setPeriod(p.value)}
-                className={`rounded px-2.5 py-1 text-xs transition-colors ${
+                aria-pressed={period === p.value}
+                className={`stock-dialog__period ${
                   period === p.value
-                    ? 'bg-[var(--color-primary)] text-white'
-                    : 'border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-primary)]/50'
+                    ? 'stock-dialog__period--active'
+                    : ''
                 }`}
               >
                 {p.label}
@@ -187,8 +173,7 @@ export default function StockDetailDialog({
           </label>
         </div>
 
-        {/* Chart area */}
-        <div className="relative flex-1 px-5 py-3" style={{ minHeight: 420 }}>
+        <div className="stock-dialog__chart">
           {status === 'loading' && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-[var(--color-text-secondary)]">
               加载中…
@@ -202,12 +187,9 @@ export default function StockDetailDialog({
           {status === 'error' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-sm text-red-400">
               <span>{error || '加载失败'}</span>
-              <button
-                onClick={refetch}
-                className="mt-2 rounded border border-[var(--color-border)] px-3 py-1 text-xs"
-              >
+              <Button onClick={refetch} variant="ghost" size="md" className="mt-2">
                 重试
-              </button>
+              </Button>
             </div>
           )}
           {/* Always render chart container so its instance is preserved; opacity hides during non-success */}
@@ -216,37 +198,6 @@ export default function StockDetailDialog({
           </div>
         </div>
 
-        {/* Footer CTA */}
-        <div className="flex items-center justify-between border-t border-[var(--color-border)] px-5 py-3">
-          <div className="text-xs text-red-400">{actionError}</div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleAddFavorite}
-              disabled={adding || isFavorited}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                isFavorited
-                  ? 'border border-amber-400/50 bg-amber-400/10 text-amber-400'
-                  : 'border border-[var(--color-border)] hover:border-amber-400'
-              } disabled:cursor-not-allowed disabled:opacity-50`}
-            >
-              {isFavorited ? '★ 已收藏' : adding ? '加入中...' : '☆ 加入收藏'}
-            </button>
-            <button
-              onClick={handleOpenSwarm}
-              className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20"
-              title="召开 5 角色 AI 投资委员会"
-            >
-              🏛 AI 委员会
-            </button>
-            <button
-              onClick={handleOpenTrade}
-              className="rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white"
-            >
-              → 跳详情分析
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

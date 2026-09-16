@@ -46,7 +46,7 @@ export default function IndicatorCard({
 
   return (
     <div
-      className={`relative rounded-xl bg-[var(--color-bg-primary)] border border-[var(--color-border)] border-t-2 p-4 transition-colors hover:border-[var(--color-border)] hover:bg-[#1c1c1c] ${
+      className={`relative rounded-xl bg-[var(--color-bg-primary)] border border-[var(--color-border)] border-t-2 p-4 transition-colors hover:border-[var(--color-border)] hover:bg-[var(--surface-2)] ${
         signalColor ? topBar[signalColor] : 'border-t-transparent'
       }`}
     >
@@ -61,7 +61,7 @@ export default function IndicatorCard({
               </span>
               {/* Hover Tooltip */}
               <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-64 -translate-x-1/2 opacity-0 transition-opacity duration-150 group-hover/tip:opacity-100">
-                <div className="rounded-xl border border-[var(--color-border)] bg-[#1a1a1a] p-4 shadow-2xl">
+                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--surface-1)] p-4 shadow-2xl">
                   <div className="mb-1 text-sm font-semibold text-[var(--color-text-primary)]">
                     {exp.name}
                   </div>

@@ -50,7 +50,14 @@ export class HistoryService {
   async get(id: string): Promise<ScanSnapshot | null> {
     try {
       const buf = await fs.readFile(this.shardPath(id), 'utf8');
-      return JSON.parse(buf) as ScanSnapshot;
+      const snapshot = JSON.parse(buf) as ScanSnapshot;
+      if (!snapshot.aiReviewStatus) {
+        const reviewed = Object.values(snapshot.results).some((results) =>
+          results.some((result) => result.aiReview),
+        );
+        snapshot.aiReviewStatus = reviewed ? 'done' : 'not_requested';
+      }
+      return snapshot;
     } catch (err: unknown) {
       if (isNodeError(err) && err.code === 'ENOENT') return null;
       throw err;
@@ -142,6 +149,9 @@ export class HistoryService {
 
 function toMeta(snapshot: ScanSnapshot): ScanSnapshotMeta {
   const total = Object.values(snapshot.results).reduce((sum, arr) => sum + arr.length, 0);
+  const inferredReviewed = Object.values(snapshot.results).some((results) =>
+    results.some((result) => result.aiReview),
+  );
   return {
     id: snapshot.id,
     date: snapshot.date,
@@ -149,6 +159,8 @@ function toMeta(snapshot: ScanSnapshot): ScanSnapshotMeta {
     strategyIds: snapshot.strategyIds,
     marketFilter: snapshot.marketFilter,
     totalResults: total,
+    aiReviewStatus: snapshot.aiReviewStatus ?? (inferredReviewed ? 'done' : 'not_requested'),
+    aiReviewedAt: snapshot.aiReviewedAt,
   };
 }
 

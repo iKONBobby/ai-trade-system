@@ -36,7 +36,7 @@ screenerRouter.get('/strategies', (_req: Request, res: Response) => {
 /** POST /api/screener/run — start a screening job */
 screenerRouter.post('/run', async (req: Request, res: Response) => {
   try {
-    const { strategyIds, market, includeGEM, includeSTAR } = req.body as ScreenerRunRequest;
+    const { strategyIds, market, includeGEM, includeSTAR, useAIReview, realtimeSource } = req.body as ScreenerRunRequest;
 
     if (!strategyIds || !Array.isArray(strategyIds) || strategyIds.length === 0) {
       res.status(400).json({ error: 'INVALID_STRATEGY', message: 'strategyIds must be a non-empty array' });
@@ -54,9 +54,16 @@ screenerRouter.post('/run', async (req: Request, res: Response) => {
       return;
     }
 
+    if (realtimeSource && !['auto', 'eastmoney', 'tencent', 'hithink'].includes(realtimeSource)) {
+      res.status(400).json({ error: 'INVALID_SOURCE', message: 'realtimeSource must be auto, eastmoney, tencent, or hithink' });
+      return;
+    }
+
     const jobIds = await runScreener(strategyIds, market ?? 'all', {
       includeGEM: includeGEM === true,
       includeSTAR: includeSTAR === true,
+      useAIReview: useAIReview === true,
+      realtimeSource: realtimeSource ?? 'auto',
     });
     res.json({ jobIds });
   } catch (err: unknown) {

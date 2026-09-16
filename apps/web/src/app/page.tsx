@@ -1,123 +1,60 @@
 import Link from 'next/link';
+import { Badge, Icon, Metric, PageHeader, Surface } from '@/components/ui/primitives';
 
-const features = [
-  {
-    href: '/trade',
-    title: '智能交易',
-    desc: '输入股票代码，AI 分析行情，自动生成破冰号最优交易配置文件',
-    icon: (
-      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-      </svg>
-    ),
-    color: 'text-[var(--color-accent)]',
-    bg: 'bg-[var(--color-accent)]/5',
-    border: 'border-[var(--color-accent)]/20',
-    available: true,
-  },
-  {
-    href: '/analysis',
-    title: '技术分析',
-    desc: '多维度技术指标分析：布林带、MACD、RSI、均线系统、成交量分析',
-    icon: (
-      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-    color: 'text-blue-400',
-    bg: 'bg-blue-400/5',
-    border: 'border-blue-400/20',
-    available: false,
-  },
-  {
-    href: '/screener',
-    title: '智能选股',
-    desc: '多因子模型筛选：基本面 + 技术面 + 资金面，AI 评分排名',
-    icon: (
-      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
-    ),
-    color: 'text-purple-400',
-    bg: 'bg-purple-400/5',
-    border: 'border-purple-400/20',
-    available: false,
-  },
-  {
-    href: '/news',
-    title: '财经资讯',
-    desc: '实时财经新闻聚合，AI 摘要关键信息，市场情绪分析',
-    icon: (
-      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
-      </svg>
-    ),
-    color: 'text-amber-400',
-    bg: 'bg-amber-400/5',
-    border: 'border-amber-400/20',
-    available: false,
-  },
+const modules = [
+  { href: '/trade', index: '01', icon: 'trade' as const, title: '策略执行', description: '输入股票代码，查看行情、指标与可复盘的交易配置。', status: '可用', tone: 'positive' as const },
+  { href: '/analysis', index: '02', icon: 'chart' as const, title: '技术分析', description: '把趋势、动量、波动和成交量放到同一张分析桌上。', status: '准备中', tone: 'neutral' as const },
+  { href: '/screener', index: '03', icon: 'search' as const, title: '市场筛选', description: '用规则筛出候选股，保留每一次扫描的结果和变化。', status: '准备中', tone: 'neutral' as const },
+  { href: '/news', index: '04', icon: 'news' as const, title: '资讯流', description: '聚合影响市场的新闻与公告，按上下文快速浏览。', status: '准备中', tone: 'neutral' as const },
+  { href: '/number-lab', index: '05', icon: 'spark' as const, title: '随机实验室', description: '用可解释过滤与安全随机源运行三因子数字实验。', status: '可用', tone: 'positive' as const },
 ];
 
 export default function Home() {
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      {/* Hero */}
-      <div className="mb-10">
-        <h1 className="text-2xl font-bold">
-          <span className="text-[var(--color-accent)]">AI</span> 交易系统
-        </h1>
-        <p className="mt-2 text-sm text-[var(--color-text-secondary)] max-w-lg">
-          基于规则引擎与 AI 的 A 股智能交易辅助平台。分析行情、生成策略、辅助决策。
-        </p>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        eyebrow="Market workspace / 01"
+        title="交易工作台"
+        description="用行情、规则和记录，建立一条可以回看的决策链。"
+        actions={<Link href="/trade" className="ui-button ui-button--primary ui-button--lg">开始分析 <Icon name="arrow-up-right" size={16} /></Link>}
+      />
 
-      {/* Feature Cards */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {features.map((f) => (
-          <Link
-            key={f.href}
-            href={f.href}
-            className={`group relative rounded-xl border ${f.border} ${f.bg} p-5 transition-all hover:scale-[1.02] ${
-              f.available
-                ? 'cursor-pointer hover:shadow-lg hover:shadow-[var(--color-accent)]/5'
-                : 'cursor-default'
-            }`}
-          >
-            {!f.available && (
-              <span className="absolute top-3 right-4 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--color-bg-card-hover)] text-[var(--color-text-secondary)] border border-[var(--color-border)]">
-                即将推出
-              </span>
-            )}
-            <div className={`mb-3 ${f.color}`}>{f.icon}</div>
-            <h2 className="text-sm font-semibold mb-1.5">
-              {f.title}
-              {!f.available && (
-                <span className="ml-2 text-[10px] text-[var(--color-text-secondary)] font-normal">
-                  开发中
-                </span>
-              )}
-            </h2>
-            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">{f.desc}</p>
-          </Link>
-        ))}
-      </div>
+      <section className="home-grid" aria-label="工作台概览">
+        <Surface className="home-intro">
+          <div className="section-label">Today’s board</div>
+          <div className="home-intro__title">把复杂的市场信息，整理成下一步。</div>
+          <p>这里不是预测面板。先看事实，再看规则，最后决定是否行动。</p>
+          <div className="home-intro__rule" />
+          <div className="home-intro__meta"><span>数据状态</span><span className="home-live"><i /> API 在线</span></div>
+        </Surface>
 
-      {/* Quick Stats */}
-      <div className="mt-10 grid grid-cols-3 gap-4">
-        <div className="rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border)] p-4 text-center">
-          <div className="text-2xl font-bold text-[var(--color-accent)]">1</div>
-          <div className="text-xs text-[var(--color-text-secondary)] mt-1">已上线功能</div>
+        <Surface className="home-metrics">
+          <div className="section-label">Workspace status</div>
+          <div className="home-metrics__row">
+            <Metric label="已上线模块" value="01" detail="策略执行" tone="positive" />
+            <Metric label="观察维度" value="03" detail="价 / 量 / 规则" />
+            <Metric label="版本" value="1.0" detail="稳定版" />
+          </div>
+        </Surface>
+      </section>
+
+      <section className="home-modules" aria-labelledby="module-title">
+        <div className="home-section-heading">
+          <div><div className="section-label">Modules</div><h2 id="module-title">工作区</h2></div>
+          <span>按需进入，不强行聚合</span>
         </div>
-        <div className="rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border)] p-4 text-center">
-          <div className="text-2xl font-bold text-[var(--color-text-secondary)]">3</div>
-          <div className="text-xs text-[var(--color-text-secondary)] mt-1">开发中功能</div>
+        <div className="home-module-list">
+          {modules.map((module) => (
+            <Link key={module.href} href={module.href} className={`home-module ${module.tone === 'neutral' ? 'home-module--disabled' : ''}`}>
+              <span className="home-module__index num">{module.index}</span>
+              <span className="home-module__icon"><Icon name={module.icon} size={19} /></span>
+              <span className="home-module__body"><strong>{module.title}</strong><span>{module.description}</span></span>
+              <Badge tone={module.tone}>{module.status}</Badge>
+              <Icon name="chevron-right" size={17} className="home-module__arrow" />
+            </Link>
+          ))}
         </div>
-        <div className="rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border)] p-4 text-center">
-          <div className="text-2xl font-bold text-[var(--color-text-secondary)]">v1.0</div>
-          <div className="text-xs text-[var(--color-text-secondary)] mt-1">当前版本</div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

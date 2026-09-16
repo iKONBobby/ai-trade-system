@@ -36,7 +36,7 @@ export default function ScreenerCard({
         <div className="ml-2 flex items-center gap-2">
           <span
             className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white ${scoreColor}`}
-            title={`匹配得分: ${result.score}`}
+            title={result.aiReview ? `综合得分: ${result.score}` : `量化匹配得分: ${result.score}`}
           >
             {result.score}
           </span>
@@ -45,10 +45,11 @@ export default function ScreenerCard({
               e.stopPropagation();
               onToggleFavorite(result.code);
             }}
-            className={`text-lg transition-colors ${
+            className={`flex h-11 w-11 cursor-pointer items-center justify-center rounded-md text-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${
               isFavorited ? 'text-amber-400' : 'text-gray-300 hover:text-amber-300'
             }`}
             title={isFavorited ? '取消收藏' : '加入候选池'}
+            aria-label={isFavorited ? `取消收藏 ${result.name}` : `收藏 ${result.name}`}
           >
             ★
           </button>
@@ -62,7 +63,7 @@ export default function ScreenerCard({
           {changeSign}{result.change.toFixed(2)}%
         </span>
         <span className="text-xs text-[var(--color-text-secondary)]">
-          换手 {result.turnover.toFixed(1)}%
+          换手 {result.turnoverAvailable === false ? '—' : `${result.turnover.toFixed(1)}%`}
         </span>
       </div>
 
@@ -84,6 +85,23 @@ export default function ScreenerCard({
             </span>
           ))}
       </div>
+
+      {result.aiReview && (
+        <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+          <div className="mb-1 flex items-center gap-2 text-xs">
+            <span className="rounded-full bg-[var(--color-primary)]/10 px-2 py-0.5 font-medium text-[var(--color-primary)]">
+              AI 复核
+            </span>
+            <span className="tabular-nums text-[var(--color-text-secondary)]">
+              量化 {result.quantScore} · AI {result.aiReview.score} · 可信度 {result.aiReview.confidence}%
+            </span>
+          </div>
+          <p className="text-xs leading-5 text-[var(--color-text-primary)]">{result.aiReview.thesis}</p>
+          {result.aiReview.risks[0] && (
+            <p className="mt-1 text-xs leading-5 text-amber-500">风险：{result.aiReview.risks[0]}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

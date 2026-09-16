@@ -99,7 +99,8 @@ function buildPrompt(market: MarketData, analysis: AnalysisResult): string {
   parts.push(`## 波动与成交量`);
   parts.push(`布林带: 上轨=${analysis.bollinger.upper.toFixed(2)} 中轨=${analysis.bollinger.middle.toFixed(2)} 下轨=${analysis.bollinger.lower.toFixed(2)} 带宽=${analysis.bollinger.width.toFixed(4)}`);
   parts.push(`ATR: ${analysis.atr.toFixed(2)}  振幅: ${adv.amplitude.toFixed(2)}%`);
-  parts.push(`换手率: ${market.turnover.toFixed(2)}%  成交量: ${(market.volume / 10000).toFixed(0)} 万手`);
+  const turnover = market.turnoverAvailable === false ? '不可用' : `${market.turnover.toFixed(2)}%`;
+  parts.push(`换手率: ${turnover}  成交量: ${(market.volume / 10000).toFixed(0)} 万手`);
   if (adv.volumeRatio !== null) parts.push(`量比: ${adv.volumeRatio.toFixed(2)}`);
 
   parts.push('');

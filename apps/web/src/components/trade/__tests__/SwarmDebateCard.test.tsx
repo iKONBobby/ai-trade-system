@@ -135,7 +135,7 @@ describe('SwarmDebateCard — running state', () => {
     );
   });
 
-  it('agent_chunk 累积流式文字', () => {
+  it('流式期隐藏原始 JSON, 显示分析中骨架 (D1 A 方案)', () => {
     render(<SwarmDebateCard runInfo={RUN_INFO} />);
     emitAll([
       {
@@ -145,10 +145,20 @@ describe('SwarmDebateCard — running state', () => {
         agentIds: ['bull_advocate'],
       },
       { type: 'agent_started', agentId: 'bull_advocate', index: 0 },
-      { type: 'agent_chunk', agentId: 'bull_advocate', text: '看多 ', done: false },
-      { type: 'agent_chunk', agentId: 'bull_advocate', text: '理由', done: false },
+      // 真实场景这里是严格 JSON 流, 普通用户看不懂 — 不应直接渲染
+      {
+        type: 'agent_chunk',
+        agentId: 'bull_advocate',
+        text: '{"thesis_bullets":["',
+        done: false,
+      },
+      { type: 'agent_chunk', agentId: 'bull_advocate', text: '估值修复', done: false },
     ]);
-    expect(screen.getByText('看多 理由')).toBeInTheDocument();
+    // 原始流式文字不再展示
+    expect(screen.queryByText(/thesis_bullets/)).not.toBeInTheDocument();
+    // 改为 "XX 正在分析…" 脉冲骨架
+    expect(screen.getByTestId('swarm-analyzing')).toBeInTheDocument();
+    expect(screen.getByText(/看多研究员 正在分析…/)).toBeInTheDocument();
   });
 });
 

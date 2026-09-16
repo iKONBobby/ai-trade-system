@@ -366,7 +366,7 @@ export default function AnalysisResult({ data, showAI = false, totalCapital, isT
           )}
           <IndicatorCard
             label="换手率"
-            value={`${market.turnover.toFixed(2)}%`}
+            value={market.turnoverAvailable === false ? '—' : `${market.turnover.toFixed(2)}%`}
             explanationKey="turnover"
           />
           <IndicatorCard

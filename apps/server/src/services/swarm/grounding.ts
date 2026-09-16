@@ -15,7 +15,7 @@ export function formatPriceBlock(market: MarketData): string {
     `现价: ${market.price.toFixed(2)} 元`,
     `涨跌幅: ${market.change.toFixed(2)}%`,
     `今开: ${market.open.toFixed(2)}  最高: ${market.high.toFixed(2)}  最低: ${market.low.toFixed(2)}  昨收: ${market.preClose.toFixed(2)}`,
-    `换手率: ${market.turnover.toFixed(2)}%  成交量: ${(market.volume / 10000).toFixed(0)} 万手`,
+    `换手率: ${market.turnoverAvailable === false ? '不可用' : `${market.turnover.toFixed(2)}%`}  成交量: ${(market.volume / 10000).toFixed(0)} 万手`,
   ].join('\n');
 }
 

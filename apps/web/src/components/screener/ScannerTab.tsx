@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { ScreenerResult, FavoriteEntry, BackupBundle } from '@trade/shared';
+import type { ScreenerResult, FavoriteEntry, BackupBundle, JobProgress, RealtimeSourcePreference } from '@trade/shared';
 import {
   fetchStrategies,
   runScreener,
   fetchProgress,
+  ScreenerJobExpiredError,
   cancelScreenerJob,
   fetchFavorites,
   addFavorite,
@@ -14,22 +15,40 @@ import {
   bulkImportFavorites,
   exportBackup,
   importBackup,
+  reviewSnapshotWithAI,
+  type ScreenerStrategySummary,
 } from '@/lib/api';
+import {
+  clearScreenerSession,
+  loadScreenerSession,
+  saveScreenerSession,
+} from '@/lib/screener-recovery';
 import ScreenerCard from '@/components/ScreenerCard';
 import WatchlistPanel from '@/components/WatchlistPanel';
 import FavoriteEditDialog from '@/components/FavoriteEditDialog';
 import StockDetailDialog from '@/components/StockDetailDialog';
+import MarketSourceSwitch from '@/components/MarketSourceSwitch';
+import { readRealtimeSource, saveRealtimeSource } from '@/lib/market-source';
+import AIReviewAction from '@/components/screener/AIReviewAction';
+import StrategyPickerDialog from '@/components/screener/StrategyPickerDialog';
 
 const LOCALSTORAGE_FAVORITES_KEY = 'screener_favorites';
 
 export default function ScannerTab() {
-  const [strategies, setStrategies] = useState<{ id: string; name: string; description: string }[]>([]);
+  const [strategies, setStrategies] = useState<ScreenerStrategySummary[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [strategyPickerOpen, setStrategyPickerOpen] = useState(false);
   const [market, setMarket] = useState('all');
   const [includeGEM, setIncludeGEM] = useState(false);
   const [includeSTAR, setIncludeSTAR] = useState(false);
+  const [useAIReview, setUseAIReview] = useState(false);
+  const [realtimeSource, setRealtimeSource] = useState<RealtimeSourcePreference>('auto');
+  const [aiReviewStatus, setAIReviewStatus] = useState<JobProgress['aiReviewStatus']>('not_requested');
+  const [aiReviewedAt, setAIReviewedAt] = useState<string | undefined>();
+  const [reviewingResults, setReviewingResults] = useState(false);
+  const [scanPhase, setScanPhase] = useState<JobProgress['phase']>('scanning');
   const [jobIds, setJobIds] = useState<string[]>([]);
-  const [progress, setProgress] = useState<Record<string, { scanned: number; total: number }>>({});
+  const [progress, setProgress] = useState<Record<string, JobProgress['progress']>>({});
   const [results, setResults] = useState<Record<string, ScreenerResult[]>>({});
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [activeTab, setActiveTab] = useState<string>('');
@@ -40,6 +59,54 @@ export default function ScannerTab() {
   const [info, setInfo] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Reconnect to an in-flight server job after navigating away and back.
+  useEffect(() => {
+    const saved = loadScreenerSession();
+    if (!saved) return;
+    setSelectedIds(saved.selectedIds);
+    setMarket(saved.market);
+    setIncludeGEM(saved.includeGEM);
+    setIncludeSTAR(saved.includeSTAR);
+    setUseAIReview(saved.useAIReview);
+    setRealtimeSource(saved.realtimeSource ?? readRealtimeSource());
+    setActiveTab(saved.activeTab);
+    setProgress(
+      Object.fromEntries(
+        Object.entries(saved.progress).map(([id, value]) => [
+          id,
+          { ...value, failed: value.failed ?? 0 },
+        ]),
+      ),
+    );
+    setStatus('running');
+    setJobIds(saved.jobIds);
+  }, []);
+
+  // Persist the latest visible progress so returning to the page has no reset flash.
+  useEffect(() => {
+    if (status !== 'running' || jobIds.length === 0) return;
+    saveScreenerSession({
+      jobIds,
+      selectedIds,
+      market,
+      includeGEM,
+      includeSTAR,
+      useAIReview,
+      realtimeSource,
+      activeTab,
+      progress,
+    });
+  }, [activeTab, includeGEM, includeSTAR, jobIds, market, progress, realtimeSource, selectedIds, status, useAIReview]);
+
+  useEffect(() => {
+    if (!loadScreenerSession()) setRealtimeSource(readRealtimeSource());
+  }, []);
+
+  const handleRealtimeSourceChange = useCallback((source: RealtimeSourcePreference) => {
+    setRealtimeSource(source);
+    saveRealtimeSource(source);
+  }, []);
 
   // Initial load: strategies + favorites (with one-shot localStorage migration)
   useEffect(() => {
@@ -91,27 +158,47 @@ export default function ScannerTab() {
 
     const poll = async () => {
       let allDone = true;
-      const newProgress: Record<string, { scanned: number; total: number }> = {};
+      const newProgress: Record<string, JobProgress['progress']> = {};
       const newResults: Record<string, ScreenerResult[]> = {};
 
       for (const jid of jobIds) {
         try {
           const p = await fetchProgress(jid);
           newProgress[jid] = p.progress;
+          setScanPhase(p.phase);
+          setAIReviewStatus(p.aiReviewStatus);
+          setAIReviewedAt(p.aiReviewedAt);
+          if (p.aiReviewError) setInfo(p.aiReviewError);
           if (p.status === 'done') {
-            newResults[jid] = p.results ?? [];
+            if (p.resultsByStrategy) {
+              Object.assign(newResults, p.resultsByStrategy);
+            } else if (p.strategyId) {
+              newResults[p.strategyId] = p.results ?? [];
+            }
           } else if (p.status === 'error') {
+            clearScreenerSession();
             setError(p.error ?? '扫描失败');
             setStatus('error');
             stop();
             return;
           } else if (p.status === 'cancelled') {
+            clearScreenerSession();
+            setJobIds([]);
+            setStatus('idle');
             stop();
             return;
           } else {
             allDone = false;
           }
-        } catch {
+        } catch (err) {
+          if (err instanceof ScreenerJobExpiredError) {
+            clearScreenerSession();
+            setJobIds([]);
+            setStatus('idle');
+            setError('上次扫描任务已过期，请重新开始');
+            stop();
+            return;
+          }
           allDone = false;
         }
       }
@@ -123,6 +210,7 @@ export default function ScannerTab() {
       }
       if (allDone) {
         setStatus('done');
+        clearScreenerSession();
         stop(); // halt the interval once everything is done
       }
     };
@@ -143,16 +231,48 @@ export default function ScannerTab() {
     setResults({});
     setProgress({});
     setStatus('running');
+    setScanPhase('scanning');
+    setAIReviewStatus(useAIReview ? 'running' : 'not_requested');
+    setAIReviewedAt(undefined);
 
     try {
-      const { jobIds: ids } = await runScreener(selectedIds, market, { includeGEM, includeSTAR });
+      const { jobIds: ids } = await runScreener(selectedIds, market, {
+        includeGEM,
+        includeSTAR,
+        useAIReview,
+        realtimeSource,
+      });
       setJobIds(ids);
       setActiveTab(selectedIds[0]);
     } catch (e: unknown) {
+      clearScreenerSession();
       setError(e instanceof Error ? e.message : '启动失败');
       setStatus('error');
     }
-  }, [selectedIds, market, includeGEM, includeSTAR]);
+  }, [selectedIds, market, includeGEM, includeSTAR, useAIReview, realtimeSource]);
+
+  const handlePostScanReview = useCallback(async () => {
+    const jobId = jobIds[0];
+    if (!jobId) return;
+    setReviewingResults(true);
+    setError('');
+    setInfo('');
+    try {
+      const snapshot = await reviewSnapshotWithAI(jobId);
+      setResults(snapshot.results);
+      setAIReviewStatus(snapshot.aiReviewStatus ?? 'not_requested');
+      setAIReviewedAt(snapshot.aiReviewedAt);
+      if (snapshot.aiReviewStatus === 'done') {
+        setInfo('AI 复核完成，结果与排序已写入本次历史记录');
+      } else {
+        setError(snapshot.aiReviewError ?? 'AI 复核暂时不可用，请稍后重试');
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'AI 复核失败，请稍后重试');
+    } finally {
+      setReviewingResults(false);
+    }
+  }, [jobIds]);
 
   const handleCancel = useCallback(async () => {
     for (const jid of jobIds) {
@@ -160,6 +280,7 @@ export default function ScannerTab() {
     }
     setStatus('idle');
     setJobIds([]);
+    clearScreenerSession();
   }, [jobIds]);
 
   const toggleFavorite = useCallback(
@@ -287,14 +408,19 @@ export default function ScannerTab() {
 
   const totalProgress = Object.values(progress).reduce((s, p) => s + p.scanned, 0);
   const totalTotal = Object.values(progress).reduce((s, p) => s + p.total, 0);
-  const overallPct = totalTotal > 0 ? Math.round((totalProgress / (totalTotal * jobIds.length || 1)) * 100) : 0;
+  const totalFailed = Object.values(progress).reduce((s, p) => s + (p.failed ?? 0), 0);
+  const overallPct = totalTotal > 0 ? Math.round((totalProgress / totalTotal) * 100) : 0;
 
   const favoriteCodes = new Set(favorites.map((f) => f.stock.code));
+  const selectedStrategies = selectedIds.flatMap((id) => {
+    const strategy = strategies.find((item) => item.id === id);
+    return strategy ? [strategy] : [];
+  });
 
   return (
     <>
       {/* Header with backup actions */}
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
         <div>
           <h1 className="mb-1 text-xl font-bold">智能选股</h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
@@ -304,14 +430,14 @@ export default function ScannerTab() {
         <div className="flex gap-2">
           <button
             onClick={handleExportBackup}
-            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs"
+            className="min-h-10 rounded-md border border-[var(--color-border)] px-3 text-xs sm:min-h-9"
             title="导出全部历史 + 收藏 JSON 备份"
           >
             备份
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs"
+            className="min-h-10 rounded-md border border-[var(--color-border)] px-3 text-xs sm:min-h-9"
             title="从 JSON 备份恢复"
           >
             恢复
@@ -330,43 +456,71 @@ export default function ScannerTab() {
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {strategies.map((s) => {
-          const sel = selectedIds.includes(s.id);
-          return (
+      <section className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-4" aria-labelledby="strategy-combination-title">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 id="strategy-combination-title" className="text-sm font-semibold">策略组合</h2>
+              <span className="text-xs tabular-nums text-[var(--color-text-secondary)]">{selectedIds.length}/3</span>
+            </div>
+            <p className="mt-1 text-xs text-[var(--color-text-secondary)]">只显示已选策略，完整策略库按需打开。</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStrategyPickerOpen(true)}
+            disabled={status === 'running'}
+            className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-3 text-sm font-medium transition-colors hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-primary)]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+            </svg>
+            {selectedIds.length === 0 ? '选择策略' : '调整策略'}
+          </button>
+        </div>
+
+        <div className="mt-3 flex min-h-11 flex-wrap items-center gap-2" aria-live="polite">
+          {selectedStrategies.length > 0 ? selectedStrategies.map((strategy) => (
             <button
-              key={s.id}
-              onClick={() => toggleStrategy(s.id)}
+              key={strategy.id}
+              type="button"
+              onClick={() => toggleStrategy(strategy.id)}
               disabled={status === 'running'}
-              className={`rounded-lg border p-3 text-left transition-colors ${
-                sel
-                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5'
-                  : 'border-[var(--color-border)] bg-[var(--color-bg-card)] hover:border-[var(--color-primary)]/50'
-              } ${status === 'running' ? 'cursor-not-allowed opacity-60' : ''}`}
+              aria-label={`移除策略：${strategy.name}`}
+              className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5 px-3 text-xs font-medium transition-colors hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold">{s.name}</span>
-                <input type="checkbox" checked={sel} readOnly className="pointer-events-none" />
-              </div>
-              <p className="mt-1 text-xs text-[var(--color-text-secondary)]">{s.description}</p>
+              {strategy.name}
+              <svg aria-hidden="true" className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
+              </svg>
             </button>
-          );
-        })}
-      </div>
+          )) : (
+            <span className="text-sm text-[var(--color-text-secondary)]">尚未选择策略</span>
+          )}
+        </div>
+      </section>
+
+      <StrategyPickerDialog
+        open={strategyPickerOpen}
+        strategies={strategies}
+        selectedIds={selectedIds}
+        onToggle={toggleStrategy}
+        onClose={() => setStrategyPickerOpen(false)}
+      />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <select
           value={market}
           onChange={(e) => setMarket(e.target.value)}
           disabled={status === 'running'}
-          className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-card)] px-3 py-1.5 text-sm"
+          aria-label="股票市场范围"
+          className="min-h-11 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-card)] px-3 text-sm"
         >
           <option value="all">沪深主板</option>
           <option value="sh">仅上海主板 (600/601/603/605)</option>
           <option value="sz">仅深圳主板 (000/001/002)</option>
         </select>
 
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
+        <label className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
           <input
             type="checkbox"
             checked={includeGEM}
@@ -376,7 +530,7 @@ export default function ScannerTab() {
           />
           含创业板 (300)
         </label>
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
+        <label className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
           <input
             type="checkbox"
             checked={includeSTAR}
@@ -387,18 +541,39 @@ export default function ScannerTab() {
           含科创板 (688)
         </label>
 
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)]/50">
+          <input
+            type="checkbox"
+            checked={useAIReview}
+            onChange={(e) => setUseAIReview(e.target.checked)}
+            disabled={status === 'running'}
+            className="cursor-pointer"
+            aria-describedby="ai-review-help"
+          />
+          <span>
+            <span className="block font-medium text-[var(--color-text-primary)]">AI 复核</span>
+            <span id="ai-review-help" className="block text-[10px]">复核各策略量化前 20 名</span>
+          </span>
+        </label>
+
+        <MarketSourceSwitch
+          value={realtimeSource}
+          onChange={handleRealtimeSourceChange}
+          disabled={status === 'running'}
+        />
+
         {status !== 'running' ? (
           <button
             onClick={handleStart}
             disabled={selectedIds.length === 0}
-            className="rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            className="min-h-11 cursor-pointer rounded-md bg-[var(--color-primary)] px-4 text-sm font-medium text-[var(--accent-foreground)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             开始扫描
           </button>
         ) : (
           <button
             onClick={handleCancel}
-            className="rounded-md border border-red-400 px-4 py-1.5 text-sm font-medium text-red-400"
+            className="min-h-11 cursor-pointer rounded-md border border-red-400 px-4 text-sm font-medium text-red-400 transition-colors hover:bg-red-400/5"
           >
             取消扫描
           </button>
@@ -407,15 +582,12 @@ export default function ScannerTab() {
         {status === 'done' && (
           <button
             onClick={exportCSV}
-            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm"
+            className="min-h-11 cursor-pointer rounded-md border border-[var(--color-border)] px-3 text-sm transition-colors hover:border-[var(--color-primary)]/50"
           >
             导出 CSV
           </button>
         )}
 
-        {selectedIds.length === 3 && (
-          <span className="text-xs text-[var(--color-text-secondary)]">已达上限 (3个策略)</span>
-        )}
       </div>
 
       {error && (
@@ -435,7 +607,14 @@ export default function ScannerTab() {
       {status === 'running' && (
         <div className="mb-6">
           <div className="mb-1 flex justify-between text-xs text-[var(--color-text-secondary)]">
-            <span>扫描中...</span>
+            <span aria-live="polite">
+              {scanPhase === 'market_sync'
+                ? '正在同步并缓存历史日线，首次运行会稍慢...'
+                : useAIReview && overallPct === 100 && aiReviewStatus === 'running'
+                  ? 'AI 正在复核候选...'
+                  : '规则扫描中...'}
+              {totalFailed > 0 ? ` · ${totalFailed} 只数据获取失败` : ''}
+            </span>
             <span>{overallPct}%</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-border)]">
@@ -444,6 +623,15 @@ export default function ScannerTab() {
               style={{ width: `${overallPct}%` }}
             />
           </div>
+        </div>
+      )}
+
+      {status === 'done' && totalFailed > 0 && (
+        <div
+          role="status"
+          className="mb-4 rounded-md border border-amber-400/30 bg-amber-400/5 px-4 py-3 text-sm text-amber-400"
+        >
+          扫描已完成，其中 {totalFailed} 只股票因行情数据不可用未参与评分。
         </div>
       )}
 
@@ -465,10 +653,24 @@ export default function ScannerTab() {
 
       {status === 'done' && (
         <div>
+          <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium">扫描结果复核</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+                AI 将复核每个策略量化排名前 20 的候选，并保存评分、结论和风险。
+              </div>
+            </div>
+            <AIReviewAction
+              status={aiReviewStatus}
+              reviewedAt={aiReviewedAt}
+              loading={reviewingResults}
+              onReview={() => void handlePostScanReview()}
+            />
+          </div>
           <div className="mb-4 flex gap-2 border-b border-[var(--color-border)]">
             {selectedIds.map((sid) => {
               const s = strategies.find((x) => x.id === sid);
-              const count = results[jobIds[0]]?.length ?? 0;
+              const count = results[sid]?.length ?? 0;
               return (
                 <button
                   key={sid}
@@ -504,7 +706,7 @@ export default function ScannerTab() {
             if (activeTab === '_overlap') {
               displayResults = overlapResults;
             } else {
-              displayResults = results[jobIds[0]] ?? [];
+              displayResults = results[activeTab] ?? [];
             }
 
             if (displayResults.length === 0) {
@@ -554,6 +756,7 @@ export default function ScannerTab() {
               price: stock.price,
               change: stock.change,
               turnover: stock.turnover,
+              turnoverAvailable: stock.turnoverAvailable,
               high: stock.high,
               low: stock.low,
             } : undefined}

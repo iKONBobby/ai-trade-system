@@ -1,80 +1,74 @@
 'use client';
 
 import { Suspense, useCallback } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import ScannerTab from '@/components/screener/ScannerTab';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import * as Tabs from '@radix-ui/react-tabs';
 import HistoryTab from '@/components/screener/HistoryTab';
+import ScannerTab from '@/components/screener/ScannerTab';
 
-type Tab = 'scan' | 'history';
+type ScreenerView = 'scan' | 'history';
 
 function ScreenerInner() {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const tab: Tab = params.get('tab') === 'history' ? 'history' : 'scan';
+  const view: ScreenerView = params.get('tab') === 'history' ? 'history' : 'scan';
 
-  const setTab = useCallback(
-    (next: Tab) => {
-      const sp = new URLSearchParams(params.toString());
-      if (next === 'scan') sp.delete('tab');
-      else sp.set('tab', next);
-      const q = sp.toString();
-      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  const setView = useCallback(
+    (next: string) => {
+      const updated = new URLSearchParams(params.toString());
+      if (next === 'scan') updated.delete('tab');
+      else updated.set('tab', next);
+      const query = updated.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     },
     [params, pathname, router],
   );
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pt-6 pb-10">
-      <div className="mb-6 flex gap-1 border-b border-[var(--color-border)]">
-        <TabBtn label="扫描" active={tab === 'scan'} onClick={() => setTab('scan')} icon={ICON_SCAN} />
-        <TabBtn label="历史" active={tab === 'history'} onClick={() => setTab('history')} icon={ICON_CLOCK} />
-      </div>
-      {tab === 'scan' ? <ScannerTab /> : <HistoryTab />}
+    <div className="page-shell page-shell--wide">
+      <Tabs.Root
+        value={view}
+        onValueChange={setView}
+        orientation="horizontal"
+      >
+        <Tabs.List className="ui-tabs" aria-label="选股视图">
+          <Tabs.Trigger className="ui-tabs__trigger" value="scan">
+            {ICON_SCAN}
+            <span>市场扫描</span>
+          </Tabs.Trigger>
+          <Tabs.Trigger className="ui-tabs__trigger" value="history">
+            {ICON_CLOCK}
+            <span>历史记录</span>
+          </Tabs.Trigger>
+          <span className="ui-tabs__hint">策略筛选与复盘</span>
+        </Tabs.List>
+        <Tabs.Content className="ui-tabs__content" value="scan">
+          <ScannerTab />
+        </Tabs.Content>
+        <Tabs.Content className="ui-tabs__content" value="history">
+          <HistoryTab />
+        </Tabs.Content>
+      </Tabs.Root>
     </div>
   );
 }
 
-function TabBtn({
-  label,
-  active,
-  onClick,
-  icon,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors -mb-px ${
-        active
-          ? 'border-[var(--color-primary)] text-[var(--color-text-primary)]'
-          : 'border-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
 const ICON_SCAN = (
-  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+  <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="m20 20-4.5-4.5M10.8 17a6.2 6.2 0 1 1 0-12.4 6.2 6.2 0 0 1 0 12.4Z" />
   </svg>
 );
+
 const ICON_CLOCK = (
-  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+  <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
   </svg>
 );
 
 export default function ScreenerPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-sm text-[var(--color-text-secondary)]">加载中…</div>}>
+    <Suspense fallback={<div className="page-shell"><div className="ui-loading-panel">正在加载市场筛选…</div></div>}>
       <ScreenerInner />
     </Suspense>
   );

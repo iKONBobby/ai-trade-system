@@ -187,7 +187,7 @@ export default function IndicatorGrid({ market, analysis }: IndicatorGridProps) 
             label="量比"
             state={volR}
             value={adv.volumeRatio ? `${adv.volumeRatio.toFixed(2)}×` : '—'}
-            sub={`换手 ${market.turnover.toFixed(2)}%`}
+            sub={market.turnoverAvailable === false ? '换手 —' : `换手 ${market.turnover.toFixed(2)}%`}
           />
         ) : (
           <CompactCard label="量比" state={{ label: '—', cls: 'neutral' }} value="—" sub="无数据" />

@@ -2,12 +2,14 @@
   "name": "@trade/web",
   "version": "1.0.0",
   "scripts": {
-    "dev": "next dev --port 4000",
+    "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
     "test": "vitest run"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-tabs": "^1.1.21",
     "@trade/shared": "workspace:*",
     "lightweight-charts": "^5.2.0",
     "next": "^15.2.0",

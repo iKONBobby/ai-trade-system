@@ -15,6 +15,7 @@ import type {
   BackupBundle,
   KLine,
   KlinePeriod,
+  RealtimeSourcePreference,
 } from '@trade/shared';
 
 const BASE = '/api';
@@ -93,7 +94,15 @@ export async function fetchAIAnalysis(
 
 // ── Screener API ──────────────────────────────────────────────────
 
-export async function fetchStrategies(): Promise<{ id: string; name: string; description: string }[]> {
+export interface ScreenerStrategySummary {
+  id: string;
+  name: string;
+  description: string;
+  horizon: 'short' | 'medium' | 'long';
+  includeLimitUp: boolean;
+}
+
+export async function fetchStrategies(): Promise<ScreenerStrategySummary[]> {
   const res = await fetch(`${BASE}/screener/strategies`);
   if (!res.ok) throw new Error('获取策略列表失败');
   return res.json();
@@ -102,12 +111,19 @@ export async function fetchStrategies(): Promise<{ id: string; name: string; des
 export async function runScreener(
   strategyIds: string[],
   market?: string,
-  opts: { includeGEM?: boolean; includeSTAR?: boolean } = {},
+  opts: { includeGEM?: boolean; includeSTAR?: boolean; useAIReview?: boolean; realtimeSource?: RealtimeSourcePreference } = {},
 ): Promise<{ jobIds: string[] }> {
   const res = await fetch(`${BASE}/screener/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ strategyIds, market, includeGEM: opts.includeGEM, includeSTAR: opts.includeSTAR }),
+    body: JSON.stringify({
+      strategyIds,
+      market,
+      includeGEM: opts.includeGEM,
+      includeSTAR: opts.includeSTAR,
+      useAIReview: opts.useAIReview,
+      realtimeSource: opts.realtimeSource,
+    }),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -116,9 +132,17 @@ export async function runScreener(
   return res.json();
 }
 
+export class ScreenerJobExpiredError extends Error {
+  constructor() {
+    super('Job not found or expired');
+    this.name = 'ScreenerJobExpiredError';
+  }
+}
+
 export async function fetchProgress(jobId: string): Promise<JobProgress> {
   const res = await fetch(`${BASE}/screener/progress/${jobId}`);
   if (!res.ok) {
+    if (res.status === 404) throw new ScreenerJobExpiredError();
     const err = await res.json();
     throw new Error(err.message || '获取进度失败');
   }
@@ -190,6 +214,13 @@ export async function fetchSnapshot(id: string): Promise<ScanSnapshot> {
   const res = await fetch(`${BASE}/history/${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error('获取快照失败');
   return res.json();
+}
+
+export async function reviewSnapshotWithAI(id: string): Promise<ScanSnapshot> {
+  const res = await fetch(`${BASE}/history/${encodeURIComponent(id)}/ai-review`, { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'AI 复核失败');
+  return data as ScanSnapshot;
 }
 
 export async function fetchSnapshotDiff(fromId: string, toId: string, strategyId: string): Promise<SnapshotDiff> {

@@ -68,7 +68,7 @@ describe('SwarmAgentTimeline', () => {
     expect(screen.getByTestId('swarm-agent-risk_officer')).toHaveAttribute('data-state', 'failed');
   });
 
-  it('streaming 状态显示流式文字', () => {
+  it('streaming 状态隐藏原始文字, 显示分析中骨架 (D1 A 方案)', () => {
     render(
       <SwarmAgentTimeline
         agents={[
@@ -76,12 +76,14 @@ describe('SwarmAgentTimeline', () => {
             id: 'bull_advocate',
             role: '看多研究员',
             state: 'streaming',
-            streamedText: 'this is being generated...',
+            streamedText: '{"thesis_bullets":["原始 JSON 不该展示',
           }),
         ]}
       />,
     );
-    expect(screen.getByText('this is being generated...')).toBeInTheDocument();
+    expect(screen.queryByText(/thesis_bullets/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('swarm-analyzing')).toBeInTheDocument();
+    expect(screen.getByText(/看多研究员 正在分析…/)).toBeInTheDocument();
   });
 
   it('failed 状态显示错误信息 + alert role', () => {
@@ -178,7 +180,7 @@ describe('SwarmAgentTimeline', () => {
     expect(screen.getByLabelText(/状态: 等待中/)).toBeInTheDocument();
   });
 
-  it('streaming agent 的流式文字带 aria-live="polite"', () => {
+  it('streaming 分析中骨架带 aria-live="polite"', () => {
     render(
       <SwarmAgentTimeline
         agents={[
@@ -191,7 +193,9 @@ describe('SwarmAgentTimeline', () => {
         ]}
       />,
     );
-    const liveRegion = screen.getByText('正在生成');
-    expect(liveRegion).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getByTestId('swarm-analyzing')).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
   });
 });

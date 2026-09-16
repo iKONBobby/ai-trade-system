@@ -64,6 +64,21 @@ describe('HistoryService.append', () => {
     expect(index[0].totalResults).toBe(1);
   });
 
+  it('stores AI review status in the history index', async () => {
+    const snap = {
+      ...makeSnapshot('reviewed', '2026-05-11T10:00:00.000Z', { s1: [makeStock('600519', 80)] }),
+      aiReviewStatus: 'done' as const,
+      aiReviewedAt: '2026-05-11T10:02:00.000Z',
+    };
+    await service.append(snap);
+
+    const groups = await service.list('all');
+    expect(groups[0].snapshots[0]).toMatchObject({
+      aiReviewStatus: 'done',
+      aiReviewedAt: '2026-05-11T10:02:00.000Z',
+    });
+  });
+
   it('keeps newest at head when multiple snapshots appended', async () => {
     await service.append(makeSnapshot('a', '2026-05-10T10:00:00.000Z'));
     await service.append(makeSnapshot('b', '2026-05-11T10:00:00.000Z'));
@@ -109,6 +124,17 @@ describe('HistoryService.get', () => {
     await service.append(makeSnapshot('job_a', '2026-05-11T10:00:00.000Z'));
     await fs.unlink(path.join(tmpDir, 'history', 'job_a.json'));
     expect(await service.get('job_a')).toBeNull();
+  });
+
+  it('infers reviewed state for legacy snapshots containing AI results', async () => {
+    const stock = makeStock('600519', 82);
+    stock.aiReview = { score: 88, confidence: 75, thesis: '趋势较稳', risks: ['回撤风险'] };
+    stock.quantScore = 80;
+    await service.append(makeSnapshot('legacy_reviewed', '2026-05-11T10:00:00.000Z', { s1: [stock] }));
+
+    const snapshot = await service.get('legacy_reviewed');
+
+    expect(snapshot?.aiReviewStatus).toBe('done');
   });
 });
 

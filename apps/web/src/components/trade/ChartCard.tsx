@@ -103,7 +103,7 @@ export default function ChartCard({ stockCode }: ChartCardProps) {
                 className="num"
                 style={{
                   background: isActive ? 'var(--accent)' : 'transparent',
-                  color: isActive ? '#0a0b0d' : 'var(--text-2)',
+                  color: isActive ? 'var(--accent-foreground)' : 'var(--text-2)',
                   border: 0,
                   cursor: 'pointer',
                   padding: '4px var(--sp-3)',

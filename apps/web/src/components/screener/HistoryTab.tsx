@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { HistoryDateGroup, ScanSnapshot, SnapshotDiff, HistoryRange, ScanSnapshotMeta } from '@trade/shared';
-import { fetchHistory, fetchSnapshot, fetchSnapshotDiff, fetchStrategies } from '@/lib/api';
+import { fetchHistory, fetchSnapshot, fetchSnapshotDiff, fetchStrategies, reviewSnapshotWithAI } from '@/lib/api';
+import AIReviewAction from '@/components/screener/AIReviewAction';
 
 const RANGES: { value: HistoryRange; label: string }[] = [
   { value: 'today', label: '今天' },
@@ -19,6 +20,7 @@ export default function HistoryTab() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<ScanSnapshot | null>(null);
+  const [reviewingSnapshotId, setReviewingSnapshotId] = useState<string | null>(null);
 
   const [diffFromId, setDiffFromId] = useState<string | null>(null);
   const [diffStrategyId, setDiffStrategyId] = useState<string | null>(null);
@@ -68,23 +70,49 @@ export default function HistoryTab() {
 
   const strategyName = (id: string) => strategies.find((s) => s.id === id)?.name ?? id;
 
+  const applyReviewedSnapshot = (reviewed: ScanSnapshot) => {
+    if (selectedId === reviewed.id) setSnapshot(reviewed);
+    setGroups((current) => current.map((group) => ({
+      ...group,
+      snapshots: group.snapshots.map((item) => item.id === reviewed.id
+        ? { ...item, aiReviewStatus: reviewed.aiReviewStatus, aiReviewedAt: reviewed.aiReviewedAt }
+        : item),
+    })));
+  };
+
+  const handleListReview = async (snapshotId: string) => {
+    setReviewingSnapshotId(snapshotId);
+    setError('');
+    try {
+      const reviewed = await reviewSnapshotWithAI(snapshotId);
+      applyReviewedSnapshot(reviewed);
+      if (reviewed.aiReviewStatus !== 'done') {
+        setError(reviewed.aiReviewError ?? 'AI 复核暂时不可用，请稍后重试');
+      }
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : 'AI 复核失败，请稍后重试');
+    } finally {
+      setReviewingSnapshotId(null);
+    }
+  };
+
   return (
     <>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="mb-1 text-xl font-bold">选股历史</h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
             按日期归档的每一次扫描，可两两对比看哪些新进、哪些跌出。
           </p>
         </div>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {RANGES.map((r) => (
             <button
               key={r.value}
               onClick={() => setRange(r.value)}
-              className={`rounded-md px-3 py-1.5 text-xs ${
+              className={`min-h-10 rounded-md px-3 text-xs sm:min-h-9 ${
                 range === r.value
-                  ? 'bg-[var(--color-primary)] text-white'
+                  ? 'bg-[var(--color-primary)] text-[var(--accent-foreground)]'
                   : 'border border-[var(--color-border)] text-[var(--color-text-secondary)]'
               }`}
             >
@@ -120,6 +148,7 @@ export default function HistoryTab() {
                     isSelected={selectedId === snap.id}
                     isDiffSource={diffFromId === snap.id}
                     strategyName={strategyName}
+                    reviewing={reviewingSnapshotId === snap.id}
                     onSelect={() => {
                       setSelectedId(snap.id);
                       if (diffFromId === snap.id) {
@@ -135,6 +164,7 @@ export default function HistoryTab() {
                         setDiffFromId(snap.id);
                       }
                     }}
+                    onReview={() => void handleListReview(snap.id)}
                   />
                 ))}
               </div>
@@ -163,7 +193,13 @@ export default function HistoryTab() {
           )}
 
           {selectedId && (!diffFromId || diffFromId === selectedId) && snapshot && (
-            <SnapshotDetail snapshot={snapshot} strategyName={strategyName} />
+            <SnapshotDetail
+              snapshot={snapshot}
+              strategyName={strategyName}
+              onReviewed={(reviewed) => {
+                applyReviewedSnapshot(reviewed);
+              }}
+            />
           )}
         </div>
       </div>
@@ -176,15 +212,19 @@ function SnapshotRow({
   isSelected,
   isDiffSource,
   strategyName,
+  reviewing,
   onSelect,
   onCompare,
+  onReview,
 }: {
   snap: ScanSnapshotMeta;
   isSelected: boolean;
   isDiffSource: boolean;
   strategyName: (id: string) => string;
+  reviewing: boolean;
   onSelect: () => void;
   onCompare: () => void;
+  onReview: () => void;
 }) {
   const time = new Date(snap.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   return (
@@ -205,16 +245,32 @@ function SnapshotRow({
         <div className="text-[10px] text-[var(--color-text-secondary)]">
           {snap.marketFilter} · {snap.totalResults} 命中
         </div>
+        {snap.aiReviewStatus === 'done' && (
+          <div className="mt-1 text-[10px] font-medium text-emerald-500">AI 已复核</div>
+        )}
       </button>
-      <button
-        onClick={onCompare}
-        className={`ml-2 rounded px-2 py-1 text-[10px] ${
-          isDiffSource ? 'bg-amber-400 text-black' : 'border border-[var(--color-border)]'
-        }`}
-        title={isDiffSource ? '取消对比起点' : '设为对比起点'}
-      >
-        {isDiffSource ? '取消' : '对比'}
-      </button>
+      <div className="ml-2 flex flex-col gap-1">
+        {snap.aiReviewStatus !== 'done' && (
+          <button
+            type="button"
+            onClick={onReview}
+            disabled={reviewing}
+            aria-busy={reviewing}
+            className="min-h-8 cursor-pointer rounded bg-[var(--color-primary)] px-2 text-[10px] font-medium text-[var(--accent-foreground)] transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {reviewing ? '审核中…' : 'AI 审核'}
+          </button>
+        )}
+        <button
+          onClick={onCompare}
+          className={`min-h-8 cursor-pointer rounded px-2 text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${
+            isDiffSource ? 'bg-amber-400 text-black' : 'border border-[var(--color-border)]'
+          }`}
+          title={isDiffSource ? '取消对比起点' : '设为对比起点'}
+        >
+          {isDiffSource ? '取消' : '对比'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -222,17 +278,61 @@ function SnapshotRow({
 function SnapshotDetail({
   snapshot,
   strategyName,
+  onReviewed,
 }: {
   snapshot: ScanSnapshot;
   strategyName: (id: string) => string;
+  onReviewed: (snapshot: ScanSnapshot) => void;
 }) {
   const [activeStrategy, setActiveStrategy] = useState(snapshot.strategyIds[0]);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState('');
   const results = snapshot.results[activeStrategy] ?? [];
+
+  useEffect(() => {
+    setActiveStrategy(snapshot.strategyIds[0]);
+    setReviewError('');
+  }, [snapshot.id, snapshot.strategyIds]);
+
+  const handleReview = async () => {
+    setReviewing(true);
+    setReviewError('');
+    try {
+      const reviewed = await reviewSnapshotWithAI(snapshot.id);
+      onReviewed(reviewed);
+      if (reviewed.aiReviewStatus !== 'done') {
+        setReviewError(reviewed.aiReviewError ?? 'AI 复核暂时不可用，请稍后重试');
+      }
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : 'AI 复核失败，请稍后重试');
+    } finally {
+      setReviewing(false);
+    }
+  };
+
   return (
     <div>
-      <div className="mb-3 text-sm text-[var(--color-text-secondary)]">
-        快照 {snapshot.id} · {new Date(snapshot.timestamp).toLocaleString('zh-CN')} · 耗时 {(snapshot.durationMs / 1000).toFixed(1)}s
+      <div className="mb-3 flex flex-col gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-sm text-[var(--color-text-secondary)]">
+            快照 {snapshot.id} · {new Date(snapshot.timestamp).toLocaleString('zh-CN')} · 耗时 {(snapshot.durationMs / 1000).toFixed(1)}s
+          </div>
+          <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+            可在扫描结束后补做 AI 复核，审核结果会保存到这条历史记录。
+          </div>
+        </div>
+        <AIReviewAction
+          status={snapshot.aiReviewStatus}
+          reviewedAt={snapshot.aiReviewedAt}
+          loading={reviewing}
+          onReview={() => void handleReview()}
+        />
       </div>
+      {reviewError && (
+        <div role="alert" className="mb-3 rounded-md border border-red-400/30 bg-red-400/5 px-3 py-2 text-sm text-red-400">
+          {reviewError}
+        </div>
+      )}
       <div className="mb-3 flex gap-2 border-b border-[var(--color-border)]">
         {snapshot.strategyIds.map((sid) => (
           <button
@@ -254,15 +354,28 @@ function SnapshotDetail({
       ) : (
         <ul className="divide-y divide-[var(--color-border)] rounded-md border border-[var(--color-border)]">
           {results.map((r) => (
-            <li key={r.code} className="flex items-center justify-between px-3 py-2 text-sm hover:bg-[var(--color-bg-card)]">
-              <button onClick={() => window.open(`/trade?code=${r.code}`, '_self')} className="flex-1 text-left">
-                <span className="font-medium">{r.name}</span>
-                <span className="ml-2 text-xs text-[var(--color-text-secondary)]">{r.code}</span>
-              </button>
-              <span className={`text-xs ${r.change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                {r.change >= 0 ? '+' : ''}{r.change.toFixed(2)}%
-              </span>
-              <span className="ml-3 text-xs font-bold">{r.score}</span>
+            <li key={r.code} className="px-3 py-2 text-sm hover:bg-[var(--color-bg-card)]">
+              <div className="flex items-center justify-between">
+                <button onClick={() => window.open(`/trade?code=${r.code}`, '_self')} className="min-h-11 flex-1 cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]">
+                  <span className="font-medium">{r.name}</span>
+                  <span className="ml-2 text-xs text-[var(--color-text-secondary)]">{r.code}</span>
+                </button>
+                <span className={`text-xs ${r.change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                  {r.change >= 0 ? '+' : ''}{r.change.toFixed(2)}%
+                </span>
+                <span className="ml-3 text-xs font-bold">{r.score}</span>
+              </div>
+              {r.aiReview && (
+                <div className="mb-1 rounded-md border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5 px-2.5 py-2 text-xs leading-5">
+                  <div className="font-medium text-[var(--color-primary)]">
+                    AI {r.aiReview.score} · 可信度 {r.aiReview.confidence}% · 原量化 {r.quantScore}
+                  </div>
+                  <div>{r.aiReview.thesis}</div>
+                  {r.aiReview.risks.length > 0 && (
+                    <div className="text-amber-500">风险：{r.aiReview.risks.join('；')}</div>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -25,7 +25,7 @@ export default function SparklineSVG({
   });
 
   const isUp = data[data.length - 1] >= data[0];
-  const stroke = color === 'var(--color-primary)' ? (isUp ? '#ef4444' : '#22c55e') : color;
+  const stroke = color === 'var(--color-primary)' ? (isUp ? 'var(--up)' : 'var(--down)') : color;
 
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="flex-shrink-0">

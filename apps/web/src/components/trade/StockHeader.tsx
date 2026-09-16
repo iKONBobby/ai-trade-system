@@ -133,7 +133,7 @@ export default function StockHeader({ market, analysis }: StockHeaderProps) {
           <QuickStat label="今开" value={market.open.toFixed(2)} />
           <QuickStat label="最高" value={market.high.toFixed(2)} />
           <QuickStat label="最低" value={market.low.toFixed(2)} />
-          <QuickStat label="换手" value={`${market.turnover.toFixed(2)}%`} />
+          <QuickStat label="换手" value={market.turnoverAvailable === false ? '—' : `${market.turnover.toFixed(2)}%`} />
         </div>
       </div>
 

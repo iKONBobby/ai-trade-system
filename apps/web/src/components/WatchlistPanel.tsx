@@ -48,7 +48,7 @@ export default function WatchlistPanel({
             onClick={() => setTagFilter(null)}
             className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
               tagFilter === null
-                ? 'bg-[var(--color-primary)] text-white'
+                ? 'bg-[var(--color-primary)] text-[var(--accent-foreground)]'
                 : 'border border-[var(--color-border)] text-[var(--color-text-secondary)]'
             }`}
           >
@@ -60,7 +60,7 @@ export default function WatchlistPanel({
               onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
               className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
                 tagFilter === tag
-                  ? 'bg-[var(--color-primary)] text-white'
+                  ? 'bg-[var(--color-primary)] text-[var(--accent-foreground)]'
                   : 'border border-[var(--color-border)] text-[var(--color-text-secondary)]'
               }`}
             >

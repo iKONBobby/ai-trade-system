@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AnalyzeResponse, AIAnalysisResult, IcebreakerConfig, MarketIndex } from '@trade/shared';
+import type { AnalyzeResponse, AIAnalysisResult, IcebreakerConfig, MarketIndex, RealtimeSourcePreference } from '@trade/shared';
 import {
   analyzeStock,
   fetchAIAnalysis,
@@ -29,6 +29,7 @@ import AISummaryCard from '@/components/trade/AISummaryCard';
 import SwarmDebateCard from '@/components/trade/SwarmDebateCard';
 import ConfigPreview from '@/components/trade/ConfigPreview';
 import type { SwarmRunInfo } from '@/hooks/useSwarmStream';
+import { readRealtimeSource, saveRealtimeSource, REALTIME_SOURCE_LABELS } from '@/lib/market-source';
 
 type AiMode = 'single' | 'swarm';
 
@@ -43,6 +44,7 @@ export default function TradePage() {
   const [capital, setCapital] = useState('100000');
   const [isT0, setIsT0] = useState(false);
   const [useAI, setUseAI] = useState(true);
+  const [realtimeSource, setRealtimeSource] = useState<RealtimeSourcePreference>('auto');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AnalyzeResponse | null>(null);
@@ -64,6 +66,15 @@ export default function TradePage() {
 
   // ── 大盘指数 (进页拉一次 + 30s 轮询) ──────────────────────
   const [marketIndices, setMarketIndices] = useState<MarketIndex[] | null>(null);
+
+  useEffect(() => {
+    setRealtimeSource(readRealtimeSource());
+  }, []);
+
+  const handleRealtimeSourceChange = useCallback((source: RealtimeSourcePreference) => {
+    setRealtimeSource(source);
+    saveRealtimeSource(source);
+  }, []);
 
   // 大盘指数: 进页拉一次 + 每 30s 轮询. 拉取失败保留上次值 (不覆盖为占位).
   useEffect(() => {
@@ -228,6 +239,7 @@ export default function TradePage() {
           mode,
           isT0Mode: isT0,
           useAI,
+          realtimeSource,
         });
         setData(result);
         setHistory((prev) => {
@@ -249,7 +261,7 @@ export default function TradePage() {
         setLoading(false);
       }
     },
-    [capital, mode, isT0, useAI, triggerAI],
+    [capital, mode, isT0, useAI, realtimeSource, triggerAI],
   );
 
   const handleHistorySelect = useCallback((item: HistoryItem) => {
@@ -340,7 +352,7 @@ export default function TradePage() {
   const activeConfig = adjustedConfig ?? data?.config ?? null;
 
   return (
-    <div style={{ padding: 'var(--sp-6) var(--sp-8) var(--sp-10)', maxWidth: 1280 }}>
+    <div className="page-shell page-shell--wide" style={{ maxWidth: 1440 }}>
       <HeroBar
         indices={marketIndices ?? undefined}
         favorited={favorited}
@@ -361,6 +373,8 @@ export default function TradePage() {
         onT0Change={setIsT0}
         useAI={useAI}
         onAIChange={setUseAI}
+        realtimeSource={realtimeSource}
+        onRealtimeSourceChange={handleRealtimeSourceChange}
       />
 
       {error && (
@@ -408,7 +422,7 @@ export default function TradePage() {
               height: 30,
               padding: '0 var(--sp-3)',
               background: 'var(--accent)',
-              color: '#0a0b0d',
+              color: 'var(--accent-foreground)',
               border: '1px solid var(--accent-strong)',
               borderRadius: 'var(--r-md)',
               fontSize: 'var(--text-xs)',
@@ -514,7 +528,10 @@ export default function TradePage() {
           color: 'var(--text-3)',
         }}
       >
-        数据来源：腾讯财经 · 仅供学习参考，不构成投资建议
+        实时行情：{realtimeSource === 'auto'
+          ? `自动${data?.market.source ? ` · 本次${REALTIME_SOURCE_LABELS[data.market.source]}` : ''}`
+          : REALTIME_SOURCE_LABELS[realtimeSource]}
+        {' · '}历史日K按 Tushare / BaoStock / 东方财富顺序降级 · 仅供学习参考，不构成投资建议
       </footer>
 
       <style jsx>{`
@@ -573,7 +590,7 @@ function PillButton({
         padding: '0 var(--sp-3)',
         borderRadius: 'var(--r-pill)',
         background: active ? 'var(--accent)' : 'transparent',
-        color: active ? '#0a0b0d' : 'var(--text-2)',
+        color: active ? 'var(--accent-foreground)' : 'var(--text-2)',
         border: 'none',
         fontSize: 'var(--text-xs)',
         fontWeight: 500,

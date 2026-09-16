@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fetchRealtime, fetchKLine, UpstreamUnavailableError } from '../market.js';
+import {
+  fetchRealtime,
+  fetchRealtimeBatch,
+  fetchRealtimeTencent,
+  fetchRealtimeFromSource,
+  fetchKLine,
+  UpstreamUnavailableError,
+  __resetRealtimeBatchCacheForTest,
+} from '../market.js';
 
 const ORIG_FETCH = globalThis.fetch;
 
@@ -20,6 +28,20 @@ function makeOk(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
+function makeTencentResponse(): Response {
+  const fields = Array.from({ length: 39 }, () => '');
+  fields[1] = '贵州茅台';
+  fields[3] = '1688.50';
+  fields[4] = '1667.66';
+  fields[5] = '1668.00';
+  fields[6] = '1234';
+  fields[32] = '1.25';
+  fields[33] = '1700.00';
+  fields[34] = '1650.00';
+  fields[38] = '2.10';
+  return new Response(`v_sh600519="${fields.join('~')}";`, { status: 200 });
+}
+
 /** Emulate undici's connect-timeout shape so isRetryableNetworkError returns true. */
 function makeConnectTimeoutError(): Error {
   const cause = Object.assign(new Error('Connect Timeout'), { code: 'UND_ERR_CONNECT_TIMEOUT' });
@@ -34,8 +56,30 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = ORIG_FETCH;
+  __resetRealtimeBatchCacheForTest();
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('fetchRealtimeBatch', () => {
+  it('loads requested stocks from one full-market page using float fields', async () => {
+    const spy = vi.fn(async () => makeOk({
+      data: {
+        total: 2,
+        diff: [
+          { f2: 1688.5, f3: 1.25, f5: 1234, f8: 2.1, f12: '600519', f14: '贵州茅台', f15: 1700, f16: 1650, f17: 1668, f18: 1667.66 },
+          { f2: 12.3, f3: -0.5, f5: 4321, f8: 1.2, f12: '000001', f14: '平安银行', f15: 12.5, f16: 12.1, f17: 12.4, f18: 12.36 },
+        ],
+      },
+    }));
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const result = await fetchRealtimeBatch(['600519']);
+
+    expect(result.size).toBe(1);
+    expect(result.get('600519')).toMatchObject({ price: 1688.5, change: 1.25, preClose: 1667.66 });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('fetchRealtime retry behavior', () => {
@@ -130,13 +174,37 @@ describe('fetchRealtime retry behavior', () => {
   });
 });
 
+describe('Tencent realtime source', () => {
+  it('parses a Tencent quote and reports the actual provider', async () => {
+    globalThis.fetch = vi.fn(async () => makeTencentResponse()) as unknown as typeof fetch;
+
+    const data = await fetchRealtimeTencent('600519');
+
+    expect(data).toMatchObject({
+      code: '600519', price: 1688.5, change: 1.25,
+      preClose: 1667.66, source: 'tencent',
+    });
+  });
+
+  it('auto mode falls back to Tencent when EastMoney has no quote', async () => {
+    globalThis.fetch = vi.fn(async (input) =>
+      String(input).includes('eastmoney') ? makeOk({ data: null }) : makeTencentResponse(),
+    ) as unknown as typeof fetch;
+
+    const data = await fetchRealtimeFromSource('600519', 'auto');
+
+    expect(data.source).toBe('tencent');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('fetchKLine retry — also supports legacy signal-only signature', () => {
   it('accepts an AbortSignal as third arg (backwards compat with engine.ts)', async () => {
     const spy = vi.fn(async () => makeOk(makeKlineJson()));
     globalThis.fetch = spy as unknown as typeof fetch;
 
     const controller = new AbortController();
-    const klines = await fetchKLine('600519', 60, controller.signal);
+    const klines = await fetchKLine('600519', 60, { signal: controller.signal, skipTushare: true, skipBaoStock: true });
     expect(klines).toHaveLength(1);
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -150,7 +218,12 @@ describe('fetchKLine retry — also supports legacy signal-only signature', () =
     });
     globalThis.fetch = spy as unknown as typeof fetch;
 
-    const promise = fetchKLine('600519', 60, { retries: 1, timeoutMs: 1000 });
+    const promise = fetchKLine('600519', 60, {
+      retries: 1,
+      timeoutMs: 1000,
+      skipTushare: true,
+      skipBaoStock: true,
+    });
     await vi.advanceTimersByTimeAsync(500);
     const klines = await promise;
     expect(klines).toHaveLength(1);

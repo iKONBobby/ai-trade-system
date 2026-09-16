@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   createChart,
   CandlestickSeries,
@@ -28,6 +28,28 @@ interface SeriesRefs {
   ma20: ISeriesApi<'Line'>;
 }
 
+function readThemeColors() {
+  const styles = getComputedStyle(document.documentElement);
+  const value = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
+  return {
+    text: value('--text-3', '#747c75'),
+    grid: value('--border-1', '#303832'),
+    border: value('--border-2', '#465047'),
+    up: value('--up', '#ef5350'),
+    down: value('--down', '#27c36a'),
+  };
+}
+
+function withAlpha(color: string, alpha: number) {
+  const hex = color.replace('#', '');
+  if (hex.length !== 6) return color;
+  const value = Number.parseInt(hex, 16);
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
 export default function KLineChart({
   data,
   showMA = true,
@@ -40,27 +62,29 @@ export default function KLineChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<SeriesRefs | null>(null);
+  const [themeRevision, setThemeRevision] = useState(0);
 
   // Effect 1: create chart + series once, cleanup on unmount
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const theme = readThemeColors();
 
     const chart = createChart(container, {
       width: container.clientWidth,
       height,
       layout: {
         background: { color: 'transparent' },
-        textColor: '#999',
+        textColor: theme.text,
       },
       grid: {
-        vertLines: { color: '#222' },
-        horzLines: { color: '#222' },
+        vertLines: { color: theme.grid },
+        horzLines: { color: theme.grid },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#333' },
+      rightPriceScale: { borderColor: theme.border },
       timeScale: {
-        borderColor: '#333',
+        borderColor: theme.border,
         timeVisible: true,
         secondsVisible: false,
       },
@@ -69,12 +93,12 @@ export default function KLineChart({
 
     // A 股惯例：红涨绿跌（lightweight-charts 默认相反）
     const candle = chart.addSeries(CandlestickSeries, {
-      upColor: '#ef4444',
-      downColor: '#22c55e',
-      borderUpColor: '#ef4444',
-      borderDownColor: '#22c55e',
-      wickUpColor: '#ef4444',
-      wickDownColor: '#22c55e',
+      upColor: theme.up,
+      downColor: theme.down,
+      borderUpColor: theme.up,
+      borderDownColor: theme.down,
+      wickUpColor: theme.up,
+      wickDownColor: theme.down,
     });
     const volume = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
@@ -101,6 +125,34 @@ export default function KLineChart({
     };
   }, [height]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => setThemeRevision((value) => value + 1));
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+    const theme = readThemeColors();
+    chart.applyOptions({
+      layout: { background: { color: 'transparent' }, textColor: theme.text },
+      grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
+      rightPriceScale: { borderColor: theme.border },
+      timeScale: { borderColor: theme.border },
+    });
+    series.candle.applyOptions({
+      upColor: theme.up,
+      downColor: theme.down,
+      borderUpColor: theme.up,
+      borderDownColor: theme.down,
+      wickUpColor: theme.up,
+      wickDownColor: theme.down,
+    });
+  }, [themeRevision]);
+
   // Effect 2: data → setData on each series. Does NOT rebuild chart.
   useEffect(() => {
     const s = seriesRef.current;
@@ -122,18 +174,19 @@ export default function KLineChart({
         close: k.close,
       })),
     );
+    const theme = readThemeColors();
     s.volume.setData(
       data.map((k) => ({
         time: k.date as Time,
         value: k.volume,
-        color: k.close >= k.open ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)',
+        color: withAlpha(k.close >= k.open ? theme.up : theme.down, 0.4),
       })),
     );
     s.ma5.setData(maToLineData(data, calcMA(data, 5)));
     s.ma10.setData(maToLineData(data, calcMA(data, 10)));
     s.ma20.setData(maToLineData(data, calcMA(data, 20)));
     chartRef.current?.timeScale().fitContent();
-  }, [data]);
+  }, [data, themeRevision]);
 
   // Effect 3: showMA toggle, independent
   useEffect(() => {

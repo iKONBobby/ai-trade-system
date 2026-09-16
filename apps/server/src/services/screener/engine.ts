@@ -1,13 +1,15 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ScreenerResult, Strategy, TriggeredFactor, StockListItem, ScanSnapshot } from '@trade/shared';
+import type { MarketData, RealtimeSourcePreference, ScreenerResult, Strategy, TriggeredFactor, StockListItem, ScanSnapshot } from '@trade/shared';
 import { isGEM, isSTAR } from '@trade/shared';
-import type { ScanningJob } from './types.js';
+import type { FactorContext, ScanningJob } from './types.js';
 import { getStrategy } from './strategies.js';
-import { getFactor } from './factors.js';
-import { fetchRealtime, fetchKLine } from '../market.js';
+import { getFactor, isAtUpperLimit } from './factors.js';
+import { reviewScreenerCandidates } from './ai-reviewer.js';
+import { fetchRealtimeFromSource, fetchRealtimeBatchFromSource, fetchKLine } from '../market.js';
 import { getPersistence } from '../persistence-container.js';
 import { JsonStore } from '../storage/json-store.js';
+import { prepareTushareMarketHistory } from '../tushare-market.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STOCKS_CACHE_PATH = path.resolve(__dirname, '../../../data/stocks-cache.json');
@@ -17,6 +19,10 @@ export interface ScanBoardOpts {
   includeGEM?: boolean;
   /** 包含科创板（688xxx）。默认 false。 */
   includeSTAR?: boolean;
+  /** AI re-ranks the top 20 quantitative candidates for each strategy. */
+  useAIReview?: boolean;
+  /** Free realtime provider selection. */
+  realtimeSource?: RealtimeSourcePreference;
 }
 
 // Allow tests to inject a fake history sink without booting the full container.
@@ -270,10 +276,17 @@ export function getStockList(): StockListItem[] {
 
 const ST_PATTERN = /^(\*?ST|N|C)/;
 
-function prefilterStock(market: { name: string; price: number; change: number; turnover: number; volume: number }): boolean {
+function isAtLowerLimit(market: Pick<MarketData, 'code' | 'price' | 'preClose'>): boolean {
+  if (market.preClose <= 0) return false;
+  const limitPct = isGEM(market.code) || isSTAR(market.code) ? 20 : 10;
+  const limitPrice = Math.round(market.preClose * (1 - limitPct / 100) * 100) / 100;
+  return market.price <= limitPrice + 0.005;
+}
+
+function prefilterStock(market: MarketData): boolean {
   if (ST_PATTERN.test(market.name)) return false; // ST / *ST / 新股
-  if (market.change >= 9.8 || market.change <= -9.8) return false; // 涨跌停
-  if (market.turnover < 0.5) return false; // 换手率太低
+  if (isAtLowerLimit(market)) return false;
+  if (market.turnoverAvailable !== false && market.turnover < 0.5) return false; // 换手率太低
   return true;
 }
 
@@ -286,15 +299,21 @@ interface FactorCondition {
   weight: number;
 }
 
-function evaluateCondition(condition: FactorCondition, klines: { close: number; high: number; low: number; open: number; volume: number; date: string }[], market: { price: number; high: number; low: number; preClose: number }): { passed: boolean; actualValue: number | string | null } {
+function evaluateCondition(condition: FactorCondition, klines: { close: number; high: number; low: number; open: number; volume: number; date: string }[], market: MarketData, context?: FactorContext): { passed: boolean; actualValue: number | string | null } {
   const factor = getFactor(condition.factorId);
   if (!factor) return { passed: false, actualValue: null };
 
-  const result = factor.compute(klines as any, market as any);
+  const result = factor.compute(klines as any, market, context);
 
   if (result === null) return { passed: false, actualValue: null };
 
   const { operator, value: configValue } = condition;
+
+  if (typeof result === 'string') {
+    if (operator === 'eq') return { passed: result === configValue, actualValue: result };
+    if (operator === 'neq') return { passed: result !== configValue, actualValue: result };
+    return { passed: false, actualValue: result };
+  }
 
   if (typeof result === 'boolean') {
     if (factor.labels) {
@@ -322,12 +341,12 @@ function compare(a: number, op: string, b: number): boolean {
   }
 }
 
-function scoreStock(klines: any[], market: any, strategy: Strategy): { score: number; triggered: TriggeredFactor[] } {
+function scoreStock(klines: any[], market: MarketData, strategy: Strategy, context?: FactorContext): { score: number; triggered: TriggeredFactor[] } {
   let totalScore = 0;
   const triggered: TriggeredFactor[] = [];
 
   for (const cond of strategy.factors) {
-    const { passed, actualValue } = evaluateCondition(cond, klines, market);
+    const { passed, actualValue } = evaluateCondition(cond, klines, market, context);
     const factor = getFactor(cond.factorId);
 
     let displayName = factor?.name ?? cond.factorId;
@@ -346,6 +365,44 @@ function scoreStock(klines: any[], market: any, strategy: Strategy): { score: nu
   }
 
   return { score: totalScore, triggered };
+}
+
+interface ScannableStock {
+  stock: StockListItem;
+  market: MarketData;
+  klines: import('@trade/shared').KLine[];
+}
+
+export function __percentileRanksForTest(values: Array<{ code: string; value: number }>): Map<string, number> {
+  const sorted = values.slice().sort((a, b) => a.value - b.value);
+  const ranks = new Map<string, number>();
+  if (sorted.length === 1) {
+    ranks.set(sorted[0].code, 100);
+    return ranks;
+  }
+
+  for (let start = 0; start < sorted.length;) {
+    let end = start;
+    while (end + 1 < sorted.length && sorted[end + 1].value === sorted[start].value) end++;
+    const percentile = (((start + end) / 2) / (sorted.length - 1)) * 100;
+    for (let index = start; index <= end; index++) ranks.set(sorted[index].code, percentile);
+    start = end + 1;
+  }
+  return ranks;
+}
+
+function buildFactorContext(candidates: ScannableStock[]): FactorContext {
+  const crossSectionRanks = new Map<string, Map<string, number>>();
+  for (const factorId of ['return_20d', 'return_60d']) {
+    const factor = getFactor(factorId);
+    if (!factor) continue;
+    const values = candidates.flatMap(({ market, klines }) => {
+      const value = factor.compute(klines, market);
+      return typeof value === 'number' && Number.isFinite(value) ? [{ code: market.code, value }] : [];
+    });
+    crossSectionRanks.set(factorId, __percentileRanksForTest(values));
+  }
+  return { crossSectionRanks };
 }
 
 // ── Job management ────────────────────────────────────────────────
@@ -395,10 +452,13 @@ export async function runScreener(
     id: jobId,
     strategyIds: effectiveIds,
     status: 'running',
-    progress: { scanned: 0, total: 0 },
+    progress: { scanned: 0, total: 0, failed: 0 },
     results: new Map(),
     startedAt: Date.now(),
     abortController: new AbortController(),
+    phase: 'scanning',
+    useAIReview: boards.useAIReview === true,
+    aiReviewStatus: boards.useAIReview ? 'running' : 'not_requested',
   };
   jobs.set(jobId, job);
 
@@ -443,6 +503,9 @@ async function recordSnapshot(job: ScanningJob, marketFilter: string | undefined
     marketFilter: normalizeFilter(marketFilter),
     durationMs: Date.now() - job.startedAt,
     results: Object.fromEntries(job.results),
+    aiReviewStatus: job.aiReviewStatus === 'running' ? 'not_requested' : job.aiReviewStatus,
+    aiReviewError: job.aiReviewError,
+    aiReviewedAt: job.aiReviewedAt,
   };
   try {
     await sink.append(snapshot);
@@ -450,6 +513,113 @@ async function recordSnapshot(job: ScanningJob, marketFilter: string | undefined
   } catch (err) {
     // best-effort: NEVER throw; failure must not affect API response
     console.error(`[HISTORY:WRITE_FAIL] id=${snapshot.id}`, err);
+  }
+}
+
+async function performAIReview(job: ScanningJob): Promise<void> {
+  const signal = job.abortController.signal;
+  job.phase = 'ai_review';
+  job.useAIReview = true;
+  job.aiReviewStatus = 'running';
+  job.aiReviewError = undefined;
+
+  const outcomes = await Promise.all(job.strategyIds.map(async (sid): Promise<'success' | 'empty' | 'failed'> => {
+    const strategy = getStrategy(sid);
+    const current = job.results.get(sid) ?? [];
+    if (!strategy || current.length === 0) return 'empty';
+
+    const shortlist = current.slice(0, 20);
+    const reviews = await reviewScreenerCandidates(strategy, shortlist, signal);
+    if (!reviews) return 'failed';
+    const byCode = new Map(reviews.map((review) => [review.code, review]));
+    const reviewed = shortlist.map((candidate) => {
+      const review = byCode.get(candidate.code);
+      if (!review) return candidate;
+      const quantScore = candidate.quantScore ?? candidate.score;
+      return {
+        ...candidate,
+        quantScore,
+        score: Math.round(quantScore * 0.75 + review.score * 0.25),
+        aiReview: {
+          score: Math.round(review.score),
+          confidence: Math.round(review.confidence),
+          thesis: review.thesis,
+          risks: review.risks,
+        },
+      };
+    });
+    reviewed.sort((a, b) => b.score - a.score);
+    job.results.set(sid, [...reviewed, ...current.slice(20)]);
+    return 'success';
+  }));
+
+  if (signal.aborted) return;
+  if (outcomes.some((outcome) => outcome === 'success') || outcomes.every((outcome) => outcome === 'empty')) {
+    job.aiReviewStatus = 'done';
+    job.aiReviewedAt = new Date().toISOString();
+    if (outcomes.some((outcome) => outcome === 'failed')) job.aiReviewError = '部分策略未能完成 AI 复核，已保留其量化排序';
+  } else {
+    job.aiReviewStatus = 'unavailable';
+    job.aiReviewError = process.env.LLM_API_KEY
+      ? 'AI 复核暂时不可用，已保留量化排序'
+      : 'LLM_API_KEY 未配置，已保留量化排序';
+  }
+}
+
+const manualReviewLocks = new Set<string>();
+
+/** Add AI review to a completed current or archived scan and persist the result. */
+export async function reviewScanSnapshot(snapshotId: string): Promise<ScanSnapshot | null> {
+  if (manualReviewLocks.has(snapshotId)) throw new Error('AI_REVIEW_RUNNING');
+  const history = getPersistence().history;
+  const liveJob = jobs.get(snapshotId);
+  const stored = await history.get(snapshotId);
+  if (!liveJob && !stored) return null;
+  if (liveJob && liveJob.status !== 'done') throw new Error('SCAN_NOT_COMPLETED');
+
+  const alreadyReviewed = liveJob
+    ? liveJob.aiReviewStatus === 'done'
+    : stored?.aiReviewStatus === 'done' || Object.values(stored?.results ?? {}).some((items) => items.some((item) => item.aiReview));
+  if (alreadyReviewed && stored) return stored;
+
+  const job: ScanningJob = liveJob ?? {
+    id: stored!.id,
+    strategyIds: stored!.strategyIds,
+    status: 'done',
+    progress: { scanned: 0, total: 0, failed: 0 },
+    results: new Map(Object.entries(stored!.results)),
+    startedAt: new Date(stored!.timestamp).getTime(),
+    abortController: new AbortController(),
+    phase: 'ai_review',
+    useAIReview: true,
+    aiReviewStatus: stored!.aiReviewStatus ?? 'not_requested',
+    aiReviewError: stored!.aiReviewError,
+    aiReviewedAt: stored!.aiReviewedAt,
+  };
+
+  manualReviewLocks.add(snapshotId);
+  try {
+    await performAIReview(job);
+    const base = stored ?? {
+      id: job.id,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      strategyIds: job.strategyIds,
+      marketFilter: 'all' as const,
+      durationMs: Date.now() - job.startedAt,
+      results: {},
+    };
+    const reviewed: ScanSnapshot = {
+      ...base,
+      results: Object.fromEntries(job.results),
+      aiReviewStatus: job.aiReviewStatus === 'running' ? 'unavailable' : job.aiReviewStatus,
+      aiReviewError: job.aiReviewError,
+      aiReviewedAt: job.aiReviewedAt,
+    };
+    await history.append(reviewed);
+    return reviewed;
+  } finally {
+    manualReviewLocks.delete(snapshotId);
   }
 }
 
@@ -463,16 +633,24 @@ export async function __recordSnapshotForTest(opts: {
     id: `job_test_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     strategyIds: opts.strategyIds ?? ['ma_bullish'],
     status: 'done',
-    progress: { scanned: 0, total: 0 },
+    progress: { scanned: 0, total: 0, failed: 0 },
     results: opts.resultsMap ?? new Map(),
     startedAt: Date.now() - 1000,
     abortController: new AbortController(),
+    phase: 'scanning',
+    useAIReview: false,
+    aiReviewStatus: 'not_requested',
   };
   await recordSnapshot(fakeJob, opts.marketFilter);
 }
 
 async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoardOpts = {}): Promise<void> {
   const signal = job.abortController.signal;
+  const selectedStrategies = job.strategyIds.flatMap((id) => {
+    const strategy = getStrategy(id);
+    return strategy ? [strategy] : [];
+  });
+  const lookbackDays = Math.max(60, ...selectedStrategies.map((strategy) => strategy.lookbackDays ?? 60));
   console.log(`[SCREENER:START] job=${job.id} strategies=${job.strategyIds.join(',')} boards=${JSON.stringify(boards)}`);
 
   // Get stock list
@@ -487,11 +665,40 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
   job.progress.total = stocks.length;
   console.log(`[SCREENER] runScan: ${stocks.length} stocks after filter (cache=${getStockList().length}, marketFilter=${marketFilter ?? 'all'}, boards=${JSON.stringify(boards)})`);
 
+  // Tushare's free daily API is most efficient by trade_date: each request
+  // returns the full market and is cached as a date shard for future scans.
+  let tushareHistories: Map<string, import('@trade/shared').KLine[]> | null = null;
+  try {
+    job.phase = 'market_sync';
+    tushareHistories = await prepareTushareMarketHistory(lookbackDays, signal);
+    if (tushareHistories) console.log(`[SCREENER] Tushare history ready: ${tushareHistories.size} stocks`);
+  } catch (error) {
+    if (signal.aborted) return;
+    console.warn(`[SCREENER] Tushare history unavailable; using EastMoney fallback: ${(error as Error).message}`);
+  }
+  job.phase = 'scanning';
+
+  // One paged full-market snapshot replaces thousands of per-stock realtime
+  // calls. Missing rows still fall back to the legacy single-stock endpoint.
+  let realtimeSnapshot = new Map<string, MarketData>();
+  try {
+    realtimeSnapshot = await fetchRealtimeBatchFromSource(stocks.map((stock) => stock.code), boards.realtimeSource ?? 'auto', {
+      retries: 2,
+      timeoutMs: 8000,
+      signal,
+    });
+    console.log(`[SCREENER] Realtime batch loaded: ${realtimeSnapshot.size}/${stocks.length}`);
+  } catch (error) {
+    if (signal.aborted) return;
+    console.warn(`[SCREENER] Realtime batch unavailable; using per-stock fallback: ${(error as Error).message}`);
+  }
+
   const results = new Map<string, ScreenerResult[]>();
   for (const sid of job.strategyIds) {
     results.set(sid, []);
     job.results.set(sid, []);
   }
+  const candidates: ScannableStock[] = [];
 
   // Dynamic concurrency using simple semaphore
   let concurrency = 20;
@@ -550,10 +757,16 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
 
       try {
         // Phase 1: pre-filter with realtime data
-        let market: { name: string; price: number; change: number; turnover: number; volume: number; high: number; low: number; open: number; preClose: number };
+        let market: MarketData;
         try {
-          market = await fetchRealtime(stock.code);
+          market = realtimeSnapshot.get(stock.code) ?? await fetchRealtimeFromSource(
+            stock.code,
+            boards.realtimeSource ?? 'auto',
+            { retries: 1, timeoutMs: 6000, signal },
+          );
+          if (!market.name) market = { ...market, name: stock.name };
         } catch {
+          job.progress.failed++;
           adjustConcurrency(true);
           return; // finally still runs and increments scanned exactly once
         }
@@ -566,45 +779,30 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
         // Phase 2: K-line + factor scoring
         let klines: any[];
         try {
-          klines = await fetchKLine(stock.code, 60, signal);
+          const cachedHistory = tushareHistories?.get(stock.code);
+          klines = cachedHistory && cachedHistory.length >= Math.min(20, lookbackDays)
+            ? cachedHistory.slice(-lookbackDays)
+            : await fetchKLine(stock.code, lookbackDays, {
+              signal,
+              skipTushare: true,
+              skipBaoStock: true,
+              skipHithink: true,
+            });
         } catch {
+          job.progress.failed++;
           adjustConcurrency(true);
           return;
         }
 
         if (klines.length < 20) {
+          job.progress.failed++;
           adjustConcurrency(false);
           return;
         }
 
         adjustConcurrency(false);
 
-        // Score against each strategy
-        for (const sid of job.strategyIds) {
-          const strategy = getStrategy(sid);
-          if (!strategy) continue;
-
-          const { score, triggered } = scoreStock(klines, market, strategy);
-          if (score >= strategy.minScore) {
-            const result: ScreenerResult = {
-              code: stock.code,
-              name: market.name,
-              market: stock.market,
-              price: market.price,
-              change: market.change,
-              open: market.open,
-              high: market.high,
-              low: market.low,
-              preClose: market.preClose,
-              volume: market.volume,
-              turnover: market.turnover,
-              score,
-              triggeredFactors: triggered,
-              klineSnapshot: klines.slice(-20).map((k: any) => k.close),
-            };
-            results.get(sid)!.push(result);
-          }
-        }
+        candidates.push({ stock, market, klines });
       } finally {
         job.progress.scanned++;
         releaseSlot();
@@ -618,6 +816,37 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
 
   if (signal.aborted) return;
 
+  const factorContext = buildFactorContext(candidates);
+  for (const { stock, market, klines } of candidates) {
+    for (const sid of job.strategyIds) {
+      const strategy = getStrategy(sid);
+      if (!strategy) continue;
+      if (isAtUpperLimit(market) && !strategy.includeLimitUp) continue;
+
+      const { score, triggered } = scoreStock(klines, market, strategy, factorContext);
+      if (score >= strategy.minScore) {
+        results.get(sid)!.push({
+          code: stock.code,
+          name: market.name,
+          market: stock.market,
+          price: market.price,
+          change: market.change,
+          open: market.open,
+          high: market.high,
+          low: market.low,
+          preClose: market.preClose,
+          volume: market.volume,
+          turnover: market.turnover,
+          turnoverAvailable: market.turnoverAvailable,
+          turnoverAmount: market.turnoverAmount,
+          score,
+          triggeredFactors: triggered,
+          klineSnapshot: klines.slice(-20).map((kline) => kline.close),
+        });
+      }
+    }
+  }
+
   // Sort and trim top 50 per strategy
   for (const sid of job.strategyIds) {
     const strategyResults = results.get(sid) ?? [];
@@ -625,10 +854,12 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
     job.results.set(sid, strategyResults.slice(0, 50));
   }
 
-  job.status = 'done';
+  if (job.useAIReview && !signal.aborted) await performAIReview(job);
+
   const totalResults = Array.from(job.results.values()).reduce((sum, arr) => sum + arr.length, 0);
   console.log(`[SCREENER:DONE] job=${job.id} results=${totalResults} duration=${((Date.now() - job.startedAt) / 1000).toFixed(1)}s`);
 
-  // ENG-D3: persistence is best-effort, isolated from job lifecycle
-  void recordSnapshot(job, marketFilter);
+  // Persist before exposing done so a post-scan review can immediately update it.
+  await recordSnapshot(job, marketFilter);
+  job.status = 'done';
 }

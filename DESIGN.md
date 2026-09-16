@@ -1,15 +1,16 @@
 # AI 交易系统 · 设计系统
 
-> Established: 2026-05-12 (from `/screener` page redesign)
-> Source: `~/.gstack/projects/ai-trade-system/designs/screener-20260511/finalized.html`
+> Updated: 2026-09-08 (UI system redesign)
+> Direction: Minimalism / Swiss utility, dense trading workstation, no decorative AI treatment.
 
-本文档是项目 UI 一致性的单一来源。新页面/组件先读这里，再决定要不要破例。
+本文档是项目视觉 token 与组件外观的单一来源。跨页面的交互、可访问性、响应式和交付检查统一遵循 [`FRONTEND_GUIDELINES.md`](./FRONTEND_GUIDELINES.md)；如有视觉取值冲突，以本文为准。
 
 ## 一、调性
 
-- **Dark-first**：base #0a0b0d，三层 surface（1/2/3）逐级提亮
-- **A 股惯例**：**红涨 (`--up: #ef4444`) / 绿跌 (`--down: #22c55e`)** — 严禁反转
-- **Accent emerald** (`#10b981`)：所有"操作"调用色（按钮、链接、active 状态）
+- **Dark-first**：base #0d0f10，三层 surface（1/2/3）逐级提亮，暖白文本
+- **A 股惯例**：**红涨 (`--up: #ef5350`) / 绿跌 (`--down: #27c36a`)** — 严禁反转
+- **Accent lime** (`#c6ef67`)：只用于操作、选中态和关键标记；不做大面积装饰
+- **反 AI 味**：不使用紫蓝渐变、发光球、万能圆角卡片；信息层级靠网格、留白和边界建立
 - **数据感至上**：数字一律 `tabular-nums`，标题用中文优化字体，数字用 Inter
 
 ## 二、CSS 自定义属性
@@ -18,36 +19,36 @@
 
 ```css
 /* Surfaces */
---surface-base:  #0a0b0d;
---surface-1:     #14161a;    /* card / sidebar */
---surface-2:     #1c1f24;    /* hover / nested */
---surface-3:     #262a31;    /* nested-deeper */
---surface-hover: #20232a;
+--surface-base:  #0d0f10;
+--surface-1:     #151819;    /* card / sidebar */
+--surface-2:     #1c2020;    /* hover / nested */
+--surface-3:     #272c2b;    /* nested-deeper */
+--surface-hover: #222726;
 
 /* Text */
---text-1:        #f4f5f7;    /* primary */
---text-2:        #9ca3af;    /* secondary */
---text-3:        #6b7280;    /* tertiary / labels */
---text-disabled: #4b5563;
+--text-1:        #f1f1eb;    /* primary */
+--text-2:        #b1b5ae;    /* secondary */
+--text-3:        #7f8781;    /* tertiary / labels */
+--text-disabled: #555d58;
 
 /* Borders */
---border-1:      #262a31;
---border-2:      #353a44;
+--border-1:      #2b312f;
+--border-2:      #424a46;
 
 /* A-share semantic */
---up:            #ef4444;
---up-bg:         rgba(239, 68, 68, 0.08);
---up-dim:        #7f1d1d;
---down:          #22c55e;
---down-bg:       rgba(34, 197, 94, 0.08);
---down-dim:      #14532d;
---flat:          #94a3b8;
+--up:            #ef5350;
+--up-bg:         rgba(239, 83, 80, 0.1);
+--up-dim:        #7f2826;
+--down:          #27c36a;
+--down-bg:       rgba(39, 195, 106, 0.1);
+--down-dim:      #185b37;
+--flat:          #a2aaa5;
 
 /* Accent (actions) */
---accent:        #10b981;
---accent-strong: #059669;
---accent-bg:     rgba(16, 185, 129, 0.1);
---accent-border: rgba(16, 185, 129, 0.25);
+--accent:        #c6ef67;
+--accent-strong: #a7d34c;
+--accent-bg:     rgba(198, 239, 103, 0.11);
+--accent-border: rgba(198, 239, 103, 0.3);
 
 /* Semantic states */
 --info:          #3b82f6;
@@ -56,7 +57,7 @@
 --warning-bg:    rgba(245, 158, 11, 0.1);
 --danger:        #ef4444;
 --danger-bg:     rgba(239, 68, 68, 0.1);
---success:       #10b981;
+--success:       #27c36a;
 ```
 
 ### 间距
@@ -180,7 +181,7 @@ font-feature-settings: 'tnum', 'cv11';
 
 ### Sidebar (主导航)
 
-- 宽 220px，sticky 全高
+- 宽 236px，sticky 全高；移动端切换为顶部横向导航
 - Logo 区 64px，下 1px border
 - 链接 `.active` 用 accent-bg + 左侧 3px accent 条
 - 底部状态栏：在线 dot + 版本号
@@ -203,7 +204,7 @@ font-feature-settings: 'tnum', 'cv11';
 ### Page shell
 
 ```
-[sidebar 220px sticky] [main flex-1 max-width:1280px padding:sp-6 sp-8]
+[sidebar 236px sticky] [main flex-1 max-width:1440px padding:sp-6 sp-8]
 ```
 
 ### Page 内 vertical rhythm
@@ -362,7 +363,7 @@ K 线主图 + 成交量副图比 = 260 : 90。X 轴 5 个时间 tick，Y 轴价�
 | `hold` | `--text-2` (灰) | 中性观望 |
 | `avoid` | `--warning` (橙) | 警示规避 |
 
-**关键区分**: `--accent` (emerald) **仅**用于"操作调用色"(按钮 / 链接 / active),
+**关键区分**: `--accent` (lime) **仅**用于"操作调用色"(按钮 / 链接 / active),
 verdict 表达"情绪/方向"走 A 股 semantic 色, 不冲突.
 
 ### 8.5 Score ring (verdict 卡仓位可视化)
@@ -393,7 +394,7 @@ verdict 表达"情绪/方向"走 A 股 semantic 色, 不冲突.
 ### 8.8 入口
 
 - trade 页面顶部 toggle: "单次 · 快速" / "辩论 · 深度" (pill segment)
-- screener 单股 dialog footer: "🏛 AI 委员会" 按钮 (跳 `/trade?code=X&ai=swarm&auto=1`)
+- screener 单股 dialog footer: "AI 委员会" 按钮 (跳 `/trade?code=X&ai=swarm&auto=1`)
 - C8 recovery: trade page mount 时若 localStorage 有 < 5min 的 runId 且 server 仍有 → 显示 "上次辩论 X (Y 分钟前)" banner + 恢复按钮
 
 ### 8.9 A11y

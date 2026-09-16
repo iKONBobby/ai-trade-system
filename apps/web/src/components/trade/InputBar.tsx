@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { searchStocks } from '@/lib/api';
 import type { StockSearchItem } from '@trade/shared';
+import type { RealtimeSourcePreference } from '@trade/shared';
+import MarketSourceSwitch from '@/components/MarketSourceSwitch';
 
 export type StrategyMode = 'auto' | 'grid' | 'condition';
 
@@ -17,6 +19,8 @@ interface InputBarProps {
   onT0Change: (val: boolean) => void;
   useAI: boolean;
   onAIChange: (val: boolean) => void;
+  realtimeSource: RealtimeSourcePreference;
+  onRealtimeSourceChange: (value: RealtimeSourcePreference) => void;
 }
 
 const MODES: { value: StrategyMode; label: string }[] = [
@@ -42,6 +46,8 @@ export default function InputBar({
   onT0Change,
   useAI,
   onAIChange,
+  realtimeSource,
+  onRealtimeSourceChange,
 }: InputBarProps) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<StockSearchItem[]>([]);
@@ -232,7 +238,7 @@ export default function InputBar({
             padding: '0 var(--sp-6)',
             background: 'var(--accent)',
             border: '1px solid var(--accent)',
-            color: '#0a0b0d',
+            color: 'var(--accent-foreground)',
             borderRadius: 'var(--r-md)',
             fontFamily: 'inherit',
             fontSize: 'var(--text-h3)',
@@ -343,6 +349,12 @@ export default function InputBar({
         <ChipSwitch checked={useAI} onChange={onAIChange}>
           AI 优化
         </ChipSwitch>
+        <MarketSourceSwitch
+          value={realtimeSource}
+          onChange={onRealtimeSourceChange}
+          disabled={loading}
+          compact
+        />
       </div>
 
       {/* Suggestions dropdown */}
@@ -479,7 +491,7 @@ function ChipSwitch({
             width: 12,
             height: 12,
             borderRadius: '50%',
-            background: checked ? '#0a0b0d' : 'var(--text-2)',
+            background: checked ? 'var(--accent-foreground)' : 'var(--text-2)',
             transition: `all var(--motion-1) var(--ease)`,
           }}
         />

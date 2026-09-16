@@ -1,4 +1,14 @@
-import type { MarketData, KLine, StockSearchItem, MarketIndex } from '@trade/shared';
+import type { MarketData, KLine, StockSearchItem, MarketIndex, RealtimeSourcePreference } from '@trade/shared';
+import { fetchTushareDaily } from './tushare-market.js';
+import { fetchBaoStockDaily } from './baostock-market.js';
+import {
+  __resetHithinkStateForTest,
+  fetchHithinkDaily,
+  fetchHithinkRealtime as fetchOfficialRealtime,
+  fetchHithinkRealtimeBatch as fetchOfficialRealtimeBatch,
+  hasHithinkApiKey,
+  HithinkApiError,
+} from './hithink-market.js';
 
 /**
  * Convert A-share stock code to EastMoney market code.
@@ -171,6 +181,12 @@ export interface FetchOpts {
 export interface KLineFetchOpts extends FetchOpts {
   /** K-line period. Default 'daily' (klt=101). */
   period?: KlinePeriod;
+  /** Skip Tushare and force the existing EastMoney path (scanner fallback). */
+  skipTushare?: boolean;
+  /** Avoid process-per-stock BaoStock fallback during a full-market scan. */
+  skipBaoStock?: boolean;
+  /** Avoid one authenticated HiThink request per stock during a full-market scan. */
+  skipHithink?: boolean;
 }
 
 /**
@@ -206,7 +222,273 @@ export async function fetchRealtime(code: string, opts: FetchOpts = {}): Promise
     high: (d.f44 ?? 0) / 100,
     low: (d.f45 ?? 0) / 100,
     preClose: (d.f60 ?? 0) / 100,
+    source: 'eastmoney',
   };
+}
+
+function tencentMarketCode(code: string): string {
+  return `${code.startsWith('6') ? 'sh' : 'sz'}${code}`;
+}
+
+function parseTencentText(text: string): Map<string, MarketData> {
+  const result = new Map<string, MarketData>();
+  for (const row of text.split(';')) {
+    const match = row.match(/v_(?:sh|sz)(\d{6})="([^"]*)"/);
+    if (!match) continue;
+    const code = match[1];
+    const fields = match[2].split('~');
+    const price = quoteNumber(fields[3]);
+    if (price <= 0) continue;
+    result.set(code, {
+      code,
+      name: fields[1] ?? '',
+      price,
+      change: quoteNumber(fields[32]),
+      volume: quoteNumber(fields[6]),
+      turnover: quoteNumber(fields[38]),
+      open: quoteNumber(fields[5]),
+      high: quoteNumber(fields[33]),
+      low: quoteNumber(fields[34]),
+      preClose: quoteNumber(fields[4]),
+      source: 'tencent',
+    });
+  }
+  return result;
+}
+
+async function fetchTencentChunk(codes: readonly string[], opts: FetchOpts): Promise<Map<string, MarketData>> {
+  const query = codes.map(tencentMarketCode).join(',');
+  const response = await fetchWithRetry(`https://qt.gtimg.cn/q=${query}`, opts);
+  if (!response.ok) throw new Error(`Tencent quote API error: ${response.status}`);
+  const bytes = await response.arrayBuffer();
+  return parseTencentText(new TextDecoder('gbk').decode(bytes));
+}
+
+export async function fetchRealtimeTencent(code: string, opts: FetchOpts = {}): Promise<MarketData> {
+  const quotes = await fetchTencentChunk([code], opts);
+  const quote = quotes.get(code);
+  if (!quote) throw new Error('STOCK_NOT_FOUND');
+  return quote;
+}
+
+export async function fetchRealtimeHithink(code: string, opts: FetchOpts = {}): Promise<MarketData> {
+  try {
+    return await fetchOfficialRealtime(code, opts);
+  } catch (error) {
+    if (error instanceof HithinkApiError && (error.message === 'STOCK_NOT_FOUND' || error.code === 3001)) {
+      throw new Error('STOCK_NOT_FOUND');
+    }
+    throw new UpstreamUnavailableError('HiThink quote API is unavailable', error);
+  }
+}
+
+/** Resolve one quote using the user's selected provider. */
+export async function fetchRealtimeFromSource(
+  code: string,
+  source: RealtimeSourcePreference = 'auto',
+  opts: FetchOpts = {},
+): Promise<MarketData> {
+  if (source === 'eastmoney') return fetchRealtime(code, opts);
+  if (source === 'tencent') return fetchRealtimeTencent(code, opts);
+  if (source === 'hithink') return fetchRealtimeHithink(code, opts);
+  try {
+    return await fetchRealtime(code, opts);
+  } catch (eastMoneyError) {
+    try {
+      return await fetchRealtimeTencent(code, opts);
+    } catch {
+      if (hasHithinkApiKey()) {
+        try {
+          return await fetchRealtimeHithink(code, opts);
+        } catch {
+          // Preserve the original error so existing HTTP semantics remain stable.
+        }
+      }
+      throw eastMoneyError;
+    }
+  }
+}
+
+interface EastMoneyListQuote {
+  f2?: number | string | null;
+  f3?: number | string | null;
+  f5?: number | string | null;
+  f8?: number | string | null;
+  f12?: string | null;
+  f14?: string | null;
+  f15?: number | string | null;
+  f16?: number | string | null;
+  f17?: number | string | null;
+  f18?: number | string | null;
+}
+
+interface EastMoneyListResponse {
+  data?: {
+    total?: number;
+    diff?: EastMoneyListQuote[] | Record<string, EastMoneyListQuote>;
+  } | null;
+}
+
+const REALTIME_PAGE_SIZE = 100;
+const REALTIME_MAX_PAGES = 80;
+const REALTIME_PAGE_CONCURRENCY = 6;
+let realtimeBatchCache: { fetchedAt: number; values: Map<string, MarketData> } | null = null;
+
+export function __resetRealtimeBatchCacheForTest(): void {
+  realtimeBatchCache = null;
+  tencentBatchCache = null;
+  __resetHithinkStateForTest();
+}
+
+function quoteNumber(value: number | string | null | undefined): number {
+  if (value === '-' || value === null || value === undefined) return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function listDiff(json: EastMoneyListResponse): EastMoneyListQuote[] {
+  const diff = json.data?.diff;
+  if (!diff) return [];
+  return Array.isArray(diff) ? diff : Object.values(diff);
+}
+
+async function fetchRealtimePage(page: number, opts: FetchOpts): Promise<EastMoneyListResponse> {
+  const fields = 'f2,f3,f5,f8,f12,f14,f15,f16,f17,f18';
+  const url = `https://push2.eastmoney.com/api/qt/clist/get?pn=${page}&pz=${REALTIME_PAGE_SIZE}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=${fields}`;
+  const response = await fetchWithRetry(url, opts);
+  if (!response.ok) throw new Error(`EastMoney realtime batch API error: ${response.status}`);
+  return response.json() as Promise<EastMoneyListResponse>;
+}
+
+/**
+ * Fetch a full-market realtime snapshot in ~55 paged requests instead of one
+ * request per stock. A short in-memory cache lets concurrent scans share it.
+ */
+export async function fetchRealtimeBatch(
+  codes: readonly string[],
+  opts: FetchOpts = {},
+): Promise<Map<string, MarketData>> {
+  const wanted = new Set(codes);
+  if (realtimeBatchCache && Date.now() - realtimeBatchCache.fetchedAt < 15_000) {
+    return new Map([...realtimeBatchCache.values].filter(([code]) => wanted.has(code)));
+  }
+
+  const first = await fetchRealtimePage(1, { retries: 2, timeoutMs: 8000, ...opts });
+  const total = Math.min(first.data?.total ?? REALTIME_PAGE_SIZE, REALTIME_PAGE_SIZE * REALTIME_MAX_PAGES);
+  const pages = Math.max(1, Math.ceil(total / REALTIME_PAGE_SIZE));
+  const responses: EastMoneyListResponse[] = [first];
+
+  for (let start = 2; start <= pages; start += REALTIME_PAGE_CONCURRENCY) {
+    const pageNumbers = Array.from(
+      { length: Math.min(REALTIME_PAGE_CONCURRENCY, pages - start + 1) },
+      (_, index) => start + index,
+    );
+    const settled = await Promise.allSettled(pageNumbers.map((page) =>
+      fetchRealtimePage(page, { retries: 2, timeoutMs: 8000, ...opts }),
+    ));
+    for (const result of settled) {
+      if (result.status === 'fulfilled') responses.push(result.value);
+    }
+  }
+
+  const all = new Map<string, MarketData>();
+  for (const response of responses) {
+    for (const quote of listDiff(response)) {
+      const code = quote.f12 ?? '';
+      const price = quoteNumber(quote.f2);
+      if (!/^\d{6}$/.test(code) || price <= 0) continue;
+      all.set(code, {
+        code,
+        name: quote.f14 ?? '',
+        price,
+        change: quoteNumber(quote.f3),
+        volume: quoteNumber(quote.f5),
+        turnover: quoteNumber(quote.f8),
+        open: quoteNumber(quote.f17),
+        high: quoteNumber(quote.f15),
+        low: quoteNumber(quote.f16),
+        preClose: quoteNumber(quote.f18),
+        source: 'eastmoney',
+      });
+    }
+  }
+  realtimeBatchCache = { fetchedAt: Date.now(), values: all };
+  return new Map([...all].filter(([code]) => wanted.has(code)));
+}
+
+let tencentBatchCache: { fetchedAt: number; values: Map<string, MarketData> } | null = null;
+
+export async function fetchRealtimeBatchTencent(
+  codes: readonly string[],
+  opts: FetchOpts = {},
+): Promise<Map<string, MarketData>> {
+  const wanted = new Set(codes);
+  if (tencentBatchCache && Date.now() - tencentBatchCache.fetchedAt < 15_000) {
+    return new Map([...tencentBatchCache.values].filter(([code]) => wanted.has(code)));
+  }
+  const all = new Map<string, MarketData>();
+  const chunks: string[][] = [];
+  for (let index = 0; index < codes.length; index += 50) chunks.push(codes.slice(index, index + 50) as string[]);
+  for (let start = 0; start < chunks.length; start += 6) {
+    const settled = await Promise.allSettled(chunks.slice(start, start + 6).map((chunk) =>
+      fetchTencentChunk(chunk, { retries: 2, timeoutMs: 8000, ...opts }),
+    ));
+    for (const response of settled) {
+      if (response.status !== 'fulfilled') continue;
+      for (const [code, quote] of response.value) all.set(code, quote);
+    }
+  }
+  if (all.size === 0 && codes.length > 0) throw new UpstreamUnavailableError('Failed to reach qt.gtimg.cn');
+  tencentBatchCache = { fetchedAt: Date.now(), values: all };
+  return all;
+}
+
+export async function fetchRealtimeBatchHithink(
+  codes: readonly string[],
+  opts: FetchOpts = {},
+): Promise<Map<string, MarketData>> {
+  try {
+    return await fetchOfficialRealtimeBatch(codes, opts);
+  } catch (error) {
+    throw new UpstreamUnavailableError('HiThink batch quote API is unavailable', error);
+  }
+}
+
+export async function fetchRealtimeBatchFromSource(
+  codes: readonly string[],
+  source: RealtimeSourcePreference = 'auto',
+  opts: FetchOpts = {},
+): Promise<Map<string, MarketData>> {
+  if (source === 'eastmoney') return fetchRealtimeBatch(codes, opts);
+  if (source === 'tencent') return fetchRealtimeBatchTencent(codes, opts);
+  if (source === 'hithink') return fetchRealtimeBatchHithink(codes, opts);
+
+  let eastMoney = new Map<string, MarketData>();
+  try {
+    eastMoney = await fetchRealtimeBatch(codes, opts);
+  } catch {
+    // Tencent below becomes the full fallback.
+  }
+  const missing = codes.filter((code) => !eastMoney.has(code));
+  if (missing.length === 0) return eastMoney;
+  try {
+    const tencent = await fetchRealtimeBatchTencent(missing, opts);
+    for (const [code, quote] of tencent) eastMoney.set(code, quote);
+  } catch {
+    // HiThink below gets one final opportunity to fill the missing rows.
+  }
+
+  const stillMissing = codes.filter((code) => !eastMoney.has(code));
+  if (stillMissing.length > 0 && hasHithinkApiKey()) {
+    try {
+      const hithink = await fetchRealtimeBatchHithink(stillMissing, opts);
+      for (const [code, quote] of hithink) eastMoney.set(code, quote);
+    } catch {
+      // A partial snapshot remains useful; only fail when every provider is empty.
+    }
+  }
+  if (eastMoney.size === 0) throw new UpstreamUnavailableError('EastMoney, Tencent, and HiThink quote APIs are unavailable');
+  return eastMoney;
 }
 
 // ---- 大盘指数 ----
@@ -269,6 +551,18 @@ export async function fetchKLine(
     signalOrOpts instanceof AbortSignal
       ? { signal: signalOrOpts }
       : signalOrOpts ?? {};
+  if ((opts.period ?? 'daily') === 'daily' && !opts.skipTushare) {
+    const tushare = await fetchTushareDaily(code, days, opts.signal);
+    if (tushare && tushare.length > 0) return tushare;
+  }
+  if ((opts.period ?? 'daily') === 'daily' && !opts.skipBaoStock) {
+    const baostock = await fetchBaoStockDaily(code, days);
+    if (baostock && baostock.length > 0) return baostock;
+  }
+  if ((opts.period ?? 'daily') === 'daily' && !opts.skipHithink) {
+    const hithink = await fetchHithinkDaily(code, days, opts);
+    if (hithink && hithink.length > 0) return hithink;
+  }
   const klt = KLINE_PERIOD_TO_KLT[opts.period ?? 'daily'];
   const marketCode = getMarketCode(code);
   const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${marketCode}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=${klt}&fqt=1&end=20500101&lmt=${days}`;
