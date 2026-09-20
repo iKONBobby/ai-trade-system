@@ -47,8 +47,8 @@ export default function HeroBar({
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'space-between',
-        gap: 'var(--sp-6)',
-        marginBottom: 'var(--sp-5)',
+        gap: 'var(--sp-4)',
+        marginBottom: 'var(--sp-4)',
       }}
     >
       <div>
@@ -67,20 +67,20 @@ export default function HeroBar({
         </p>
       </div>
 
-      <div className="trade-hero-actions" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+      <div className="trade-hero-actions" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
         <div
           className="trade-market-indices"
           style={{
             display: 'flex',
-            gap: 'var(--sp-4)',
-            paddingRight: 'var(--sp-4)',
+            gap: 'var(--sp-3)',
+            paddingRight: 'var(--sp-3)',
             borderRight: '1px solid var(--border-1)',
           }}
         >
           {indices.map((idx) => (
             <div
               key={idx.label}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, minWidth: 84 }}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, minWidth: 76 }}
             >
               <span
                 style={{
@@ -228,13 +228,14 @@ function IconButton({
 }) {
   return (
     <button
+      className="trade-hero-icon"
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
       title={ariaLabel}
       style={{
-        width: 36,
-        height: 36,
+        width: 'var(--control-md)',
+        height: 'var(--control-md)',
         borderRadius: 'var(--r-md)',
         background: active ? 'var(--accent-bg)' : 'var(--surface-1)',
         border: `1px solid ${active ? 'var(--accent-border)' : 'var(--border-1)'}`,

@@ -47,7 +47,7 @@ export default function ChartCard({ stockCode }: ChartCardProps) {
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-4) var(--sp-5)',
+        padding: 'var(--sp-3) var(--sp-4)',
         marginTop: 'var(--sp-4)',
       }}
     >

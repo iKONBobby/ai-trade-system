@@ -23,7 +23,7 @@ export default function ScreenerCard({
   return (
     <div
       onClick={() => onClick(result.code)}
-      className="group cursor-pointer rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-4 transition-all hover:border-[var(--color-primary)] hover:shadow-md"
+      className="group cursor-pointer rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-3 transition-all hover:border-[var(--color-primary)] hover:shadow-md"
     >
       {/* Top row: name + code + score */}
       <div className="mb-2 flex items-start justify-between">
@@ -45,7 +45,7 @@ export default function ScreenerCard({
               e.stopPropagation();
               onToggleFavorite(result.code);
             }}
-            className={`flex h-11 w-11 cursor-pointer items-center justify-center rounded-md text-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${
+            className={`flex h-11 w-11 cursor-pointer items-center justify-center rounded-md text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] sm:h-8 sm:w-8 ${
               isFavorited ? 'text-amber-400' : 'text-gray-300 hover:text-amber-300'
             }`}
             title={isFavorited ? '取消收藏' : '加入候选池'}

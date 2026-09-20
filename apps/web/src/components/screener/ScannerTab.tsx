@@ -420,9 +420,9 @@ export default function ScannerTab() {
   return (
     <>
       {/* Header with backup actions */}
-      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+      <div className="mb-4 flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
         <div>
-          <h1 className="mb-1 text-xl font-bold">智能选股</h1>
+          <h1 className="mb-1 text-lg font-bold">智能选股</h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
             选择策略，扫描全市场符合条件的股票。每次扫描会自动归档到历史。
           </p>
@@ -430,14 +430,14 @@ export default function ScannerTab() {
         <div className="flex gap-2">
           <button
             onClick={handleExportBackup}
-            className="min-h-10 rounded-md border border-[var(--color-border)] px-3 text-xs sm:min-h-9"
+            className="min-h-11 rounded-md border border-[var(--color-border)] px-3 text-xs sm:min-h-8"
             title="导出全部历史 + 收藏 JSON 备份"
           >
             备份
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="min-h-10 rounded-md border border-[var(--color-border)] px-3 text-xs sm:min-h-9"
+            className="min-h-11 rounded-md border border-[var(--color-border)] px-3 text-xs sm:min-h-8"
             title="从 JSON 备份恢复"
           >
             恢复
@@ -456,7 +456,7 @@ export default function ScannerTab() {
         </div>
       </div>
 
-      <section className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-4" aria-labelledby="strategy-combination-title">
+      <section className="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-3" aria-labelledby="strategy-combination-title">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -469,7 +469,7 @@ export default function ScannerTab() {
             type="button"
             onClick={() => setStrategyPickerOpen(true)}
             disabled={status === 'running'}
-            className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-3 text-sm font-medium transition-colors hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-primary)]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-3 text-xs font-medium transition-colors hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-primary)]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-8"
           >
             <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
@@ -478,7 +478,7 @@ export default function ScannerTab() {
           </button>
         </div>
 
-        <div className="mt-3 flex min-h-11 flex-wrap items-center gap-2" aria-live="polite">
+        <div className="mt-3 flex min-h-11 flex-wrap items-center gap-2 sm:min-h-8" aria-live="polite">
           {selectedStrategies.length > 0 ? selectedStrategies.map((strategy) => (
             <button
               key={strategy.id}
@@ -486,7 +486,7 @@ export default function ScannerTab() {
               onClick={() => toggleStrategy(strategy.id)}
               disabled={status === 'running'}
               aria-label={`移除策略：${strategy.name}`}
-              className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5 px-3 text-xs font-medium transition-colors hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5 px-3 text-xs font-medium transition-colors hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-8"
             >
               {strategy.name}
               <svg aria-hidden="true" className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -507,20 +507,20 @@ export default function ScannerTab() {
         onClose={() => setStrategyPickerOpen(false)}
       />
 
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <select
           value={market}
           onChange={(e) => setMarket(e.target.value)}
           disabled={status === 'running'}
           aria-label="股票市场范围"
-          className="min-h-11 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-card)] px-3 text-sm"
+          className="min-h-11 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-card)] px-3 text-xs sm:min-h-8"
         >
           <option value="all">沪深主板</option>
           <option value="sh">仅上海主板 (600/601/603/605)</option>
           <option value="sz">仅深圳主板 (000/001/002)</option>
         </select>
 
-        <label className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
+        <label className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)] sm:min-h-8">
           <input
             type="checkbox"
             checked={includeGEM}
@@ -530,7 +530,7 @@ export default function ScannerTab() {
           />
           含创业板 (300)
         </label>
-        <label className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
+        <label className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-secondary)] sm:min-h-8">
           <input
             type="checkbox"
             checked={includeSTAR}
@@ -541,7 +541,7 @@ export default function ScannerTab() {
           含科创板 (688)
         </label>
 
-        <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)]/50">
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)]/50 sm:min-h-8">
           <input
             type="checkbox"
             checked={useAIReview}
@@ -566,14 +566,14 @@ export default function ScannerTab() {
           <button
             onClick={handleStart}
             disabled={selectedIds.length === 0}
-            className="min-h-11 cursor-pointer rounded-md bg-[var(--color-primary)] px-4 text-sm font-medium text-[var(--accent-foreground)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-11 cursor-pointer rounded-md bg-[var(--color-primary)] px-4 text-xs font-medium text-[var(--accent-foreground)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-8"
           >
             开始扫描
           </button>
         ) : (
           <button
             onClick={handleCancel}
-            className="min-h-11 cursor-pointer rounded-md border border-red-400 px-4 text-sm font-medium text-red-400 transition-colors hover:bg-red-400/5"
+            className="min-h-11 cursor-pointer rounded-md border border-red-400 px-4 text-xs font-medium text-red-400 transition-colors hover:bg-red-400/5 sm:min-h-8"
           >
             取消扫描
           </button>
@@ -582,7 +582,7 @@ export default function ScannerTab() {
         {status === 'done' && (
           <button
             onClick={exportCSV}
-            className="min-h-11 cursor-pointer rounded-md border border-[var(--color-border)] px-3 text-sm transition-colors hover:border-[var(--color-primary)]/50"
+            className="min-h-11 cursor-pointer rounded-md border border-[var(--color-border)] px-3 text-xs transition-colors hover:border-[var(--color-primary)]/50 sm:min-h-8"
           >
             导出 CSV
           </button>
@@ -675,7 +675,7 @@ export default function ScannerTab() {
                 <button
                   key={sid}
                   onClick={() => setActiveTab(sid)}
-                  className={`px-3 py-2 text-sm font-medium transition-colors ${
+                  className={`min-h-11 px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-8 ${
                     activeTab === sid
                       ? 'border-b-2 border-[var(--color-primary)] text-[var(--color-primary)]'
                       : 'text-[var(--color-text-secondary)]'
@@ -689,7 +689,7 @@ export default function ScannerTab() {
             {selectedIds.length > 1 && overlapResults.length > 0 && (
               <button
                 onClick={() => setActiveTab('_overlap')}
-                className={`px-3 py-2 text-sm font-medium transition-colors ${
+                className={`min-h-11 px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-8 ${
                   activeTab === '_overlap'
                     ? 'border-b-2 border-[var(--color-primary)] text-[var(--color-primary)]'
                     : 'text-[var(--color-text-secondary)]'

@@ -20,7 +20,7 @@ export default function MarketSourceSwitch({
     <div
       role="radiogroup"
       aria-label="实时行情来源"
-      className="inline-flex min-h-11 items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-card)] p-1"
+      className="inline-flex min-h-11 items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-card)] p-0.5 sm:min-h-8"
     >
       {!compact && <span className="px-2 text-xs text-[var(--color-text-secondary)]">行情源</span>}
       {SOURCES.map((source) => {
@@ -33,7 +33,7 @@ export default function MarketSourceSwitch({
             aria-checked={selected}
             disabled={disabled}
             onClick={() => onChange(source)}
-            className={`min-h-8 cursor-pointer rounded px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`min-h-10 cursor-pointer rounded px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-7 ${
               selected
                 ? 'bg-[var(--color-primary)] text-[var(--accent-foreground)]'
                 : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-card-hover)] hover:text-[var(--color-text-primary)]'

@@ -36,7 +36,7 @@ export default function StockHeader({ market, analysis }: StockHeaderProps) {
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-5)',
+        padding: 'var(--sp-4)',
         marginBottom: 'var(--sp-4)',
         display: 'grid',
         gridTemplateColumns: '1fr auto',

@@ -15,6 +15,7 @@ export type IconName =
   | 'download'
   | 'upload'
   | 'check'
+  | 'copy'
   | 'spark'
   | 'shield'
   | 'nodes';
@@ -34,6 +35,7 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   download: <path d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" />,
   upload: <path d="M12 20V10m0 0-4 4m4-4 4 4M5 5h14" />,
   check: <path d="m5 12 4.2 4L19 6.5" />,
+  copy: <path d="M9 8.5V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.5M6 8h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />,
   spark: <path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3ZM18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2ZM5 14l.9 2.6 2.6.9-2.6.9L5 21l-.9-2.6-2.6-.9 2.6-.9L5 14Z" />,
   shield: <path d="M12 3 4.5 6v5.5c0 4.4 3 7.8 7.5 9.5 4.5-1.7 7.5-5.1 7.5-9.5V6L12 3Zm-3 9 2 2 4-4" />,
   nodes: <path d="M6 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm12 3a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM7 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm10 1a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM7.8 6.2l8.4 1.6M7 8.7v6.6m2-7.1 6.5 8.2" />,

@@ -9,4 +9,5 @@ dist
 .gstack/
 docs/validation/
 apps/server/data/market-cache/
+apps/server/data/lottery-cache/
 apps/server/.venv/

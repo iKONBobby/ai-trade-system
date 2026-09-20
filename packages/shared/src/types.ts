@@ -1,6 +1,28 @@
 export type RealtimeMarketSource = 'eastmoney' | 'tencent' | 'hithink';
 export type RealtimeSourcePreference = 'auto' | RealtimeMarketSource;
 
+// ---- Lottery history (used by the random experiment lab) ----
+
+export type LotteryKind = 'ssq' | 'dlt';
+export type LotteryHistoryProvider = 'cwl' | 'sporttery' | 'juhe';
+
+export interface LotteryDraw {
+  issue: string;
+  drawDate: string;
+  front: number[];
+  back: number[];
+}
+
+export interface LotteryHistoryResponse {
+  kind: LotteryKind;
+  draws: LotteryDraw[];
+  source: LotteryHistoryProvider;
+  sourceLabel: string;
+  fetchedAt: string;
+  cached: boolean;
+  stale: boolean;
+}
+
 export interface MarketData {
   code: string;
   name: string;

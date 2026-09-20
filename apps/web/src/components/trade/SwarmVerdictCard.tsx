@@ -116,7 +116,7 @@ export default function SwarmVerdictCard({
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-5)',
+        padding: 'var(--sp-4)',
         marginTop: 'var(--sp-4)',
         animation: animate ? 'swarm-verdict-in 0.32s ease-out' : 'none',
       }}
@@ -437,9 +437,9 @@ function FeedbackButton({
 }) {
   const base = {
     flex: 1,
-    height: 36,
+    height: 'var(--control-md)',
     borderRadius: 'var(--r-md)',
-    fontSize: 'var(--text-body)',
+    fontSize: 'var(--text-sm)',
     fontWeight: 500 as const,
     cursor: disabled ? 'not-allowed' : 'pointer',
     transition: 'all var(--motion-1) var(--ease)',

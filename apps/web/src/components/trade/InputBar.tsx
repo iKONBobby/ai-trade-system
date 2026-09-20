@@ -158,12 +158,12 @@ export default function InputBar({
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-3)',
-        marginBottom: 'var(--sp-5)',
+        padding: 'var(--sp-2)',
+        marginBottom: 'var(--sp-4)',
       }}
     >
       {/* Primary row: search + analyze */}
-      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'stretch' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'stretch' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
           <span
             aria-hidden
@@ -192,16 +192,16 @@ export default function InputBar({
               if (suggestions.length > 0) setIsOpen(true);
             }}
             autoComplete="off"
-            className="num"
+            className="num trade-search-input"
             style={{
               width: '100%',
-              height: 44,
-              padding: '0 var(--sp-4) 0 var(--sp-12)',
+              height: 'var(--control-lg)',
+              padding: '0 var(--sp-3) 0 var(--sp-10)',
               background: 'var(--surface-2)',
               border: '1px solid var(--border-1)',
               color: 'var(--text-1)',
               borderRadius: 'var(--r-md)',
-              fontSize: 'var(--text-h2)',
+              fontSize: 'var(--text-body)',
               fontWeight: 500,
               letterSpacing: '-0.01em',
               outline: 'none',
@@ -233,15 +233,16 @@ export default function InputBar({
         <button
           type="submit"
           disabled={loading}
+          className="trade-search-submit"
           style={{
-            height: 44,
-            padding: '0 var(--sp-6)',
+            height: 'var(--control-lg)',
+            padding: '0 var(--sp-4)',
             background: 'var(--accent)',
             border: '1px solid var(--accent)',
             color: 'var(--accent-foreground)',
             borderRadius: 'var(--r-md)',
             fontFamily: 'inherit',
-            fontSize: 'var(--text-h3)',
+            fontSize: 'var(--text-sm)',
             fontWeight: 600,
             cursor: loading ? 'not-allowed' : 'pointer',
             opacity: loading ? 0.6 : 1,
@@ -271,8 +272,8 @@ export default function InputBar({
           display: 'flex',
           alignItems: 'center',
           gap: 'var(--sp-2)',
-          marginTop: 'var(--sp-3)',
-          paddingTop: 'var(--sp-3)',
+          marginTop: 'var(--sp-2)',
+          paddingTop: 'var(--sp-2)',
           borderTop: '1px solid var(--border-1)',
           flexWrap: 'wrap',
         }}
@@ -362,9 +363,9 @@ export default function InputBar({
         <div
           style={{
             position: 'absolute',
-            left: 'var(--sp-3)',
-            right: 'calc(var(--sp-3) + 132px)',
-            top: 'calc(var(--sp-3) + 44px + 4px)',
+            left: 'var(--sp-2)',
+            right: 'calc(var(--sp-2) + 116px)',
+            top: 'calc(var(--sp-2) + var(--control-lg) + 4px)',
             zIndex: 50,
             background: 'var(--surface-2)',
             border: '1px solid var(--border-1)',
@@ -420,12 +421,13 @@ export default function InputBar({
 function ParamChip({ children }: { children: React.ReactNode }) {
   return (
     <label
+      className="trade-param-chip"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 'var(--sp-2)',
-        height: 30,
-        padding: '0 var(--sp-3)',
+        height: 'var(--control-sm)',
+        padding: '0 var(--sp-2)',
         background: 'var(--surface-2)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-pill)',
@@ -448,12 +450,13 @@ function ChipSwitch({
 }) {
   return (
     <label
+      className="trade-chip-switch"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 'var(--sp-2)',
-        height: 30,
-        padding: '0 var(--sp-3)',
+        height: 'var(--control-sm)',
+        padding: '0 var(--sp-2)',
         background: 'var(--surface-2)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-pill)',

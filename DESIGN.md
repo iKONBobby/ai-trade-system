@@ -1,6 +1,6 @@
 # AI 交易系统 · 设计系统
 
-> Updated: 2026-09-08 (UI system redesign)
+> Updated: 2026-09-16 (compact density pass)
 > Direction: Minimalism / Swiss utility, dense trading workstation, no decorative AI treatment.
 
 本文档是项目视觉 token 与组件外观的单一来源。跨页面的交互、可访问性、响应式和交付检查统一遵循 [`FRONTEND_GUIDELINES.md`](./FRONTEND_GUIDELINES.md)；如有视觉取值冲突，以本文为准。
@@ -107,14 +107,29 @@ https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+
 ### Type ramp
 
 ```css
---text-h1:    28px;    /* page hero */
---text-h2:    20px;    /* section */
---text-h3:    15px;    /* card / sub-section */
+--text-h1:    22px;    /* page hero */
+--text-h2:    16px;    /* section */
+--text-h3:    13px;    /* card / sub-section */
 --text-body:  13px;    /* default */
 --text-sm:    12px;    /* metadata, secondary */
 --text-xs:    11px;    /* labels */
 --text-tiny:  10px;    /* badges, micro */
 ```
+
+页面级 `h1` 允许在宽屏使用 `clamp(20px, 1.8vw, 24px)`；产品级宣传标题也不超过 24px。交易工作台是工具界面，层级优先由字重、边界和留白表达，而不是持续放大字号。
+
+### 密度 / 控件高度
+
+```css
+--control-sm: 26px;    /* chip, segmented, compact secondary action */
+--control-md: 30px;    /* default button, select, icon button */
+--control-lg: 34px;    /* primary search / main CTA */
+--touch-min:  44px;    /* mobile hit target, not desktop visual height */
+```
+
+- 桌面端使用紧凑视觉尺寸；移动端（`<768px`）把主要操作和表单热区扩到 `--touch-min`
+- 小图标可以保持 14–16px，但 icon-only 按钮必须有可见焦点和 `aria-label`
+- Web 桌面指针目标不得小于 24×24px；相邻目标间保持清晰边界，移动端保持至少 44×44px 热区
 
 ### 数字规范
 
@@ -143,7 +158,8 @@ font-feature-settings: 'tnum', 'cv11';
 
 ### Button
 
-- 高度 36px；icon-only 36×36
+- 默认高度 `--control-md`（30px）；大按钮 `--control-lg`（34px）；icon-only 30×30
+- 移动端主要按钮和 icon-only 热区提升到 44×44，不改变图标视觉尺寸
 - `.btn` 默认中性、`.btn-primary` 用 accent、`.btn-ghost` 透明边、`.btn-danger` 用 danger 色
 - Icon 14×14 SVG，颜色继承
 - `:focus-visible` 强制 2px accent 描边 + 2px offset
@@ -151,6 +167,7 @@ font-feature-settings: 'tnum', 'cv11';
 ### Input / Select / Switch
 
 - 高度 32px
+- 页面主搜索框桌面 34px、移动端 44px；正文输入在移动端至少 16px 字号，避免浏览器自动缩放
 - 圆角 `--r-md`
 - 背景 `--surface-2`，边 `--border-1`
 - Switch 32×18 滑钮，开启色 = accent
@@ -160,7 +177,7 @@ font-feature-settings: 'tnum', 'cv11';
 - 背景 `--surface-1`，圆角 `--r-lg`
 - 左边 3px 颜色条标语义（涨/跌/默认/警示），hover 时显隐
 - Hover：上抬 2px + `--elev-2`，背景升到 `--surface-2`
-- 内 padding `--sp-4`
+- 常规内 padding `--sp-3`；信息复杂或含主操作的面板使用 `--sp-4`
 
 ### Tag / Chip
 
@@ -176,13 +193,13 @@ font-feature-settings: 'tnum', 'cv11';
 - 圆角 `--r-xl`（14px）
 - 边 `--border-1`
 - 阴影 `--elev-3`
-- 内 padding `--sp-5`（header/body/footer 各一份）
+- 桌面内 padding `--sp-4`（header/body/footer 各一份）；移动端保持 `--sp-4`
 - ESC 关闭 + 点 backdrop 关闭
 
 ### Sidebar (主导航)
 
-- 宽 236px，sticky 全高；移动端切换为顶部横向导航
-- Logo 区 64px，下 1px border
+- 宽 216px，sticky 全高；移动端切换为顶部横向导航
+- Logo 区 60px，下 1px border；桌面链接高 34px
 - 链接 `.active` 用 accent-bg + 左侧 3px accent 条
 - 底部状态栏：在线 dot + 版本号
 
@@ -204,23 +221,25 @@ font-feature-settings: 'tnum', 'cv11';
 ### Page shell
 
 ```
-[sidebar 236px sticky] [main flex-1 max-width:1440px padding:sp-6 sp-8]
+[sidebar 216px sticky] [main flex-1 max-width:1440px horizontal gutter:20px]
 ```
+
+页面 top / bottom = 24px / 40px。
 
 ### Page 内 vertical rhythm
 
 ```
-hero            — title + actions split row, mb sp-6
-section gap     — mb sp-5
-inner padding   — sp-4
-component gap   — sp-3
+hero            — title + actions split row, mb sp-4
+section gap     — mb sp-4
+inner padding   — sp-3（复杂面板可用 sp-4）
+component gap   — sp-2 / sp-3
 inline gap      — sp-2
 ```
 
 ### Split view (例：screener)
 
 ```
-[left rail 260px sticky] [results pane flex-1]   gap: sp-5
+[left rail 240px sticky] [results pane flex-1]   gap: sp-4
 ```
 
 `<1024px`：栈式，左 rail 折回顶部、`max-height: 280px` 控制不过长。
@@ -238,7 +257,7 @@ inline gap      — sp-2
 ## 六、Accessibility
 
 - 所有按钮 `:focus-visible` 必须可见
-- Touch target ≥ 36×36（mobile 优先）
+- Web 桌面 pointer target ≥ 24×24；移动端主要交互热区 ≥ 44×44
 - 颜色对比 4.5:1 起步（text-2 over surface-1 = 7.2:1，已合规）
 - 语义 HTML：`<main>`/`<aside>`/`<nav>`/`<section>`/`<header>`/`<article>`
 - `aria-label` for icon-only buttons
@@ -250,25 +269,25 @@ inline gap      — sp-2
 主行 = 用户的核心动作（如「搜索 + 提交」），副行 = 参数微调。
 
 ```
-[search 44px h, flex-1] [primary btn 44px h]    ← input-row-primary
+[search 34px h, flex-1] [primary btn 34px h]    ← input-row-primary（移动端 44px）
 ─────────────────────────────────────────────  ← 1px border-1
 [label] [chip] [chip] [switch] [switch] ...    ← input-row-secondary
 ```
 
-- 主行 input 高 44px、字号 `--text-h2`，焦点态背景升到 surface-1（突出感）
-- 副行高 30px，所有元素 pill 圆角，密度紧凑
+- 主行 input 高 34px、字号 `--text-body`，焦点态背景升到 surface-1（突出感）；移动端回到 44px / 16px
+- 副行高 26px，所有元素 pill 圆角，密度紧凑
 
 ### Param chip (`.param-chip`)
 
 参数容器，副行专用。`label + 输入 + unit`：
 
-- 高 30px，`--r-pill`，背景 `--surface-2` + 边 `--border-1`
+- 高 26px，`--r-pill`，背景 `--surface-2` + 边 `--border-1`
 - `:focus-within` 边变 accent
 - 内含 `.param-chip-input`（数字，宽 64px、`--font-num`）或 `.param-chip-select`（自绘 chevron，无浏览器原生样式）
 
 ### Icon button (`.icon-btn`)
 
-36×36 通用 icon-only 按钮：
+30×30 通用 icon-only 按钮（移动端热区 44×44）：
 
 - 圆角 `--r-md`，背景 `--surface-1`
 - `.active` 状态 = accent 色 + accent-bg
@@ -403,7 +422,7 @@ verdict 表达"情绪/方向"走 A 股 semantic 色, 不冲突.
 - streaming text: `aria-live="polite"` + `aria-atomic="false"`
 - verdict 卡: `<article role="status" aria-live="polite">`
 - feedback 按钮: 选中后 `aria-pressed="true"`
-- Touch targets ≥ 36×36 (DESIGN.md §六)
+- 桌面 pointer target ≥ 24×24；移动端 touch target ≥ 44×44（DESIGN.md §六）
 
 ## 九、Reference
 

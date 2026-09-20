@@ -16,9 +16,28 @@ import type {
   KLine,
   KlinePeriod,
   RealtimeSourcePreference,
+  LotteryHistoryResponse,
+  LotteryKind,
 } from '@trade/shared';
 
 const BASE = '/api';
+
+export async function fetchLotteryHistory(
+  kind: LotteryKind,
+  options: { limit?: number; refresh?: boolean; signal?: AbortSignal } = {},
+): Promise<LotteryHistoryResponse> {
+  const params = new URLSearchParams({
+    kind,
+    limit: String(options.limit ?? 100),
+    ...(options.refresh ? { refresh: '1' } : {}),
+  });
+  const res = await fetch(`${BASE}/lottery/history?${params.toString()}`, { signal: options.signal });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.message || error.error || '获取历史开奖数据失败');
+  }
+  return res.json();
+}
 
 export async function searchStocks(keyword: string): Promise<StockSearchItem[]> {
   const res = await fetch(`${BASE}/stock/search?keyword=${encodeURIComponent(keyword)}`);

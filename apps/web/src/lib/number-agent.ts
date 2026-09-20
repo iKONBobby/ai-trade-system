@@ -1,5 +1,9 @@
-export type LotteryKind = 'ssq' | 'dlt';
+import type { LotteryDraw, LotteryKind } from '@trade/shared';
+
+export type { LotteryKind } from '@trade/shared';
 export type ContextMode = 'balanced' | 'calendar' | 'signal';
+export type GenerationMode = 'fair' | 'factor';
+export type LayerCode = 'P' | 'E' | 'L';
 
 export type LotteryConfig = {
   kind: LotteryKind;
@@ -14,6 +18,7 @@ export type LotteryConfig = {
 
 export type NumberAgentInput = {
   kind: LotteryKind;
+  mode: GenerationMode;
   quantity: number;
   drawLabel?: string;
   previous?: string;
@@ -22,6 +27,8 @@ export type NumberAgentInput = {
   contextText?: string;
   inspiration?: string;
 };
+
+export type PickReference = { front: number[]; back: number[] };
 
 export type ShapeMetrics = {
   odd: number;
@@ -34,49 +41,65 @@ export type ShapeMetrics = {
   thirds: [number, number, number];
 };
 
-export type AgentPick = {
+export type AgentPick = PickReference & {
   id: string;
-  front: number[];
-  back: number[];
   shape: ShapeMetrics;
   crowdingScore: number;
   reason: string;
   inspirationTrace: string;
 };
 
+export type LayerTrace = {
+  code: LayerCode;
+  status: 'done' | 'skipped';
+  summary: string;
+  metrics: string[];
+};
+
+export type ProbabilityLayer = {
+  trace: LayerTrace;
+  historyCount: number;
+  latest: LotteryDraw | null;
+  exactHistory: Set<string>;
+  previousFront: number[];
+  hot: number[];
+  priorPicks: PickReference[];
+  frequentFront: number[];
+};
+
+export type WeightLayer = {
+  trace: LayerTrace;
+  frontTargets: number[];
+  backTargets: number[];
+};
+
+export type AgentLayers = {
+  probability: ProbabilityLayer;
+  environment: WeightLayer;
+  inspiration: WeightLayer;
+};
+
+export type RejectionReason = 'history' | 'latest' | 'structure' | 'crowding' | 'batch';
+export type RejectionBreakdown = Record<RejectionReason, number>;
+
 export type AgentRun = {
   config: LotteryConfig;
+  mode: GenerationMode;
   picks: AgentPick[];
   attempted: number;
   rejected: number;
+  rejectionBreakdown: RejectionBreakdown;
+  traces: LayerTrace[];
   contextSummary: string;
   generatedAt: string;
 };
 
 export const LOTTERY_CONFIGS: Record<LotteryKind, LotteryConfig> = {
-  ssq: {
-    kind: 'ssq',
-    name: '双色球',
-    frontLabel: '红球',
-    backLabel: '蓝球',
-    frontMax: 33,
-    frontCount: 6,
-    backMax: 16,
-    backCount: 1,
-  },
-  dlt: {
-    kind: 'dlt',
-    name: '大乐透',
-    frontLabel: '前区',
-    backLabel: '后区',
-    frontMax: 35,
-    frontCount: 5,
-    backMax: 12,
-    backCount: 2,
-  },
+  ssq: { kind: 'ssq', name: '双色球', frontLabel: '红球', backLabel: '蓝球', frontMax: 33, frontCount: 6, backMax: 16, backCount: 1 },
+  dlt: { kind: 'dlt', name: '大乐透', frontLabel: '前区', backLabel: '后区', frontMax: 35, frontCount: 5, backMax: 12, backCount: 2 },
 };
 
-type RandomSource = () => number;
+export type RandomSource = () => number;
 
 function secureRandom(): number {
   if (typeof globalThis.crypto?.getRandomValues === 'function') {
@@ -115,28 +138,21 @@ function mappedNumbers(value: string, max: number, count: number): number[] {
   return Array.from(result);
 }
 
-function weightedSample(max: number, count: number, weightFor: (number: number) => number, random: RandomSource): number[] {
+function sample(max: number, count: number, weightFor: (number: number) => number, random: RandomSource): number[] {
   const pool = Array.from({ length: max }, (_, index) => index + 1);
   const selected: number[] = [];
-
-  while (selected.length < count && pool.length > 0) {
+  while (selected.length < count) {
     const weights = pool.map((number) => Math.max(0.05, weightFor(number)));
     const total = weights.reduce((sum, weight) => sum + weight, 0);
     let cursor = random() * total;
     let selectedIndex = pool.length - 1;
-
     for (let index = 0; index < pool.length; index += 1) {
       cursor -= weights[index];
-      if (cursor <= 0) {
-        selectedIndex = index;
-        break;
-      }
+      if (cursor <= 0) { selectedIndex = index; break; }
     }
-
     selected.push(pool[selectedIndex]);
     pool.splice(selectedIndex, 1);
   }
-
   return selected.sort((a, b) => a - b);
 }
 
@@ -145,11 +161,9 @@ export function analyzeShape(numbers: number[], max: number): ShapeMetrics {
   const split = max / 2;
   const third = max / 3;
   let adjacentPairs = 0;
-
   for (let index = 1; index < sorted.length; index += 1) {
     if (sorted[index] - sorted[index - 1] === 1) adjacentPairs += 1;
   }
-
   return {
     odd: sorted.filter((number) => number % 2 !== 0).length,
     even: sorted.filter((number) => number % 2 === 0).length,
@@ -163,6 +177,91 @@ export function analyzeShape(numbers: number[], max: number): ShapeMetrics {
       sorted.filter((number) => number > third && number <= third * 2).length,
       sorted.filter((number) => number > third * 2).length,
     ],
+  };
+}
+
+function combinationKey(front: number[], back: number[]): string {
+  return `${[...front].sort((a, b) => a - b).join('-')}|${[...back].sort((a, b) => a - b).join('-')}`;
+}
+
+function intersectionSize(left: number[], right: number[]): number {
+  const rightSet = new Set(right);
+  return left.filter((number) => rightSet.has(number)).length;
+}
+
+function frequencyLeaders(draws: LotteryDraw[], count: number): number[] {
+  const frequencies = new Map<number, number>();
+  draws.forEach((draw) => draw.front.forEach((number) => frequencies.set(number, (frequencies.get(number) ?? 0) + 1)));
+  return [...frequencies.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0] - right[0])
+    .slice(0, count)
+    .map(([number]) => number);
+}
+
+export function analyzeProbabilityLayer(input: NumberAgentInput, history: LotteryDraw[], priorPicks: PickReference[]): ProbabilityLayer {
+  const config = LOTTERY_CONFIGS[input.kind];
+  if (input.mode === 'fair') {
+    return {
+      trace: { code: 'P', status: 'skipped', summary: '公平模式不读取历史过滤条件', metrics: ['仅校验彩种号码范围与不重复'] },
+      historyCount: history.length, latest: history[0] ?? null, exactHistory: new Set(), previousFront: [], hot: [], priorPicks: [], frequentFront: [],
+    };
+  }
+  const latest = history[0] ?? null;
+  const manualPrevious = parseNumberList(input.previous, config.frontMax).slice(0, config.frontCount);
+  const previousFront = manualPrevious.length === config.frontCount ? manualPrevious : latest?.front ?? [];
+  const hot = parseNumberList(input.hot, config.frontMax);
+  const frequentFront = frequencyLeaders(history, Math.min(8, config.frontMax));
+  return {
+    trace: {
+      code: 'P', status: 'done',
+      summary: history.length ? `已分析 ${history.length} 期真实开奖，最新 ${latest?.issue ?? '未知期号'}` : '未取得历史数据，仅执行本地结构与跨批次过滤',
+      metrics: [
+        `历史原样组合 ${history.length} 组`,
+        `跨批次参考 ${priorPicks.length} 组`,
+        frequentFront.length ? `高频观察 ${frequentFront.map((number) => String(number).padStart(2, '0')).join(' / ')}` : '无频次样本',
+      ],
+    },
+    historyCount: history.length,
+    latest,
+    exactHistory: new Set(history.map((draw) => combinationKey(draw.front, draw.back))),
+    previousFront,
+    hot,
+    priorPicks,
+    frequentFront,
+  };
+}
+
+function shanghaiDate(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+export function analyzeEnvironmentLayer(input: NumberAgentInput): WeightLayer {
+  const config = LOTTERY_CONFIGS[input.kind];
+  if (input.mode === 'fair') {
+    return { trace: { code: 'E', status: 'skipped', summary: '公平模式不施加环境权重', metrics: ['所有合法号码保持等权'] }, frontTargets: [], backTargets: [] };
+  }
+  const source = input.contextMode === 'calendar'
+    ? `${shanghaiDate()}|${input.drawLabel ?? ''}`
+    : input.contextMode === 'signal' ? `${input.contextText ?? ''}|${input.drawLabel ?? ''}` : '';
+  const frontTargets = mappedNumbers(source, config.frontMax, 5);
+  const backTargets = mappedNumbers(source, config.backMax, 2);
+  const label = input.contextMode === 'calendar' ? '上海时区日期与期号' : input.contextMode === 'signal' ? '自定义关键词与期号' : '均衡设置';
+  return {
+    trace: { code: 'E', status: 'done', summary: `${label}已转换为可追踪权重`, metrics: [frontTargets.length ? `前区 +10%：${frontTargets.join(' / ')}` : '前区保持等权', backTargets.length ? `后区 +10%：${backTargets.join(' / ')}` : '后区保持等权'] },
+    frontTargets, backTargets,
+  };
+}
+
+export function analyzeInspirationLayer(input: NumberAgentInput): WeightLayer {
+  const config = LOTTERY_CONFIGS[input.kind];
+  if (input.mode === 'fair') {
+    return { trace: { code: 'L', status: 'skipped', summary: '公平模式不施加文本映射权重', metrics: ['安全随机源直接抽样'] }, frontTargets: [], backTargets: [] };
+  }
+  const frontTargets = mappedNumbers(input.inspiration ?? '', config.frontMax, 4);
+  const backTargets = mappedNumbers(input.inspiration ?? '', config.backMax, 2);
+  return {
+    trace: { code: 'L', status: 'done', summary: frontTargets.length ? '灵感词已确定性映射，不联网、不预测' : '未填写灵感词，本层保持中性', metrics: [frontTargets.length ? `前区 +22%：${frontTargets.join(' / ')}` : '前区保持等权', backTargets.length ? `后区 +22%：${backTargets.join(' / ')}` : '后区保持等权'] },
+    frontTargets, backTargets,
   };
 }
 
@@ -180,145 +279,105 @@ function isArithmetic(numbers: number[]): boolean {
 
 function expectedSumRange(max: number, count: number): [number, number] {
   const mean = count * (max + 1) / 2;
-  const populationVariance = (max * max - 1) / 12;
+  const variance = (max * max - 1) / 12;
   const correction = max > 1 ? (max - count) / (max - 1) : 0;
-  const deviation = Math.sqrt(count * populationVariance * correction);
+  const deviation = Math.sqrt(count * variance * correction);
   return [mean - deviation * 1.5, mean + deviation * 1.5];
 }
 
-function intersectionSize(left: number[], right: number[]): number {
-  const rightSet = new Set(right);
-  return left.filter((number) => rightSet.has(number)).length;
-}
-
-function isStructurallyValid(
-  numbers: number[],
-  config: LotteryConfig,
-  previous: number[],
-  hot: number[],
-  accepted: AgentPick[],
-): boolean {
-  const shape = analyzeShape(numbers, config.frontMax);
+function structureIsValid(front: number[], config: LotteryConfig): boolean {
+  const shape = analyzeShape(front, config.frontMax);
   const [minSum, maxSum] = expectedSumRange(config.frontMax, config.frontCount);
-  const extremeParity = shape.odd === 0 || shape.even === 0;
-  const extremeSize = shape.low === 0 || shape.high === 0;
-  const oneZoneOnly = shape.thirds.some((count) => count === 0);
-  const matchesPrevious = previous.length >= config.frontCount
-    && numbers.every((number) => previous.includes(number));
-  const repeatedTooMuch = intersectionSize(numbers, previous) >= Math.min(3, config.frontCount);
-  const hotCollision = intersectionSize(numbers, hot) >= Math.min(5, config.frontCount);
-  const selfCollision = accepted.some((pick) => intersectionSize(numbers, pick.front) >= Math.min(5, config.frontCount));
-
-  return !matchesPrevious
-    && !repeatedTooMuch
-    && !hotCollision
-    && !selfCollision
-    && !extremeParity
-    && !extremeSize
-    && !oneZoneOnly
-    && shape.adjacentPairs <= 1
-    && shape.span >= Math.min(15, config.frontMax - 1)
-    && shape.sum >= minSum
-    && shape.sum <= maxSum
-    && sameTailPeak(numbers) < 3
-    && !isArithmetic(numbers);
+  return shape.odd > 0 && shape.even > 0 && shape.low > 0 && shape.high > 0
+    && shape.thirds.every((count) => count > 0) && shape.adjacentPairs <= 1
+    && shape.span >= Math.min(15, config.frontMax - 1) && shape.sum >= minSum && shape.sum <= maxSum
+    && sameTailPeak(front) < 3 && !isArithmetic(front);
 }
 
 function crowdingScore(numbers: number[], max: number, hot: number[], previous: number[]): number {
   const shape = analyzeShape(numbers, max);
-  const count = numbers.length;
-  const ideal = count / 2;
-  const birthdayShare = numbers.filter((number) => number <= 31).length / count;
-  const zonePenalty = shape.thirds.reduce((sum, zone) => sum + Math.abs(zone - count / 3) * 3, 0);
-  const parityPenalty = Math.abs(shape.odd - ideal) * 4;
-  const sizePenalty = Math.abs(shape.low - ideal) * 4;
-  const birthdayPenalty = max > 31 ? birthdayShare * 10 : 4;
-  const collisionPenalty = intersectionSize(numbers, hot) * 4 + intersectionSize(numbers, previous) * 3;
-  const patternPenalty = shape.adjacentPairs * 8 + Math.max(0, sameTailPeak(numbers) - 1) * 5;
-  return Math.max(0, Math.min(100, Math.round(10 + zonePenalty + parityPenalty + sizePenalty + birthdayPenalty + collisionPenalty + patternPenalty)));
+  const ideal = numbers.length / 2;
+  const birthdayShare = numbers.filter((number) => number <= 31).length / numbers.length;
+  const score = 10 + shape.thirds.reduce((sum, zone) => sum + Math.abs(zone - numbers.length / 3) * 3, 0)
+    + Math.abs(shape.odd - ideal) * 4 + Math.abs(shape.low - ideal) * 4 + (max > 31 ? birthdayShare * 10 : 4)
+    + intersectionSize(numbers, hot) * 4 + intersectionSize(numbers, previous) * 3
+    + shape.adjacentPairs * 8 + Math.max(0, sameTailPeak(numbers) - 1) * 5;
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-function contextTargets(input: NumberAgentInput, max: number): number[] {
-  if (input.contextMode === 'balanced') return [];
-  const source = input.contextMode === 'calendar'
-    ? `${new Date().toISOString().slice(0, 10)}|${input.drawLabel ?? ''}`
-    : `${input.contextText ?? ''}|${input.drawLabel ?? ''}`;
-  return mappedNumbers(source, max, 5);
-}
-
-function buildWeight(targets: number[], inspiration: number[]) {
-  const targetSet = new Set(targets);
+function buildWeight(environment: number[], inspiration: number[]) {
+  const environmentSet = new Set(environment);
   const inspirationSet = new Set(inspiration);
   return (number: number) => {
     let weight = 1;
-    if (targetSet.has(number)) weight *= 1.1;
+    if (environmentSet.has(number)) weight *= 1.1;
     if (inspirationSet.has(number)) weight *= 1.22;
     if (inspirationSet.has(number - 1) || inspirationSet.has(number + 1)) weight *= 1.06;
     return weight;
   };
 }
 
-function contextSummary(input: NumberAgentInput): string {
-  if (input.contextMode === 'calendar') return '日历模式：仅使用本地日期与期号做 ±10% 权重扰动';
-  if (input.contextMode === 'signal') {
-    return input.contextText?.trim()
-      ? `关键词模式：已映射“${input.contextText.trim().slice(0, 24)}”`
-      : '关键词模式：未填写关键词，按中性权重执行';
-  }
-  return '均衡模式：不加入环境权重';
+function rejectReason(front: number[], back: number[], config: LotteryConfig, p: ProbabilityLayer, accepted: AgentPick[]): RejectionReason | null {
+  if (p.exactHistory.has(combinationKey(front, back))) return 'history';
+  if (p.previousFront.length && intersectionSize(front, p.previousFront) >= Math.min(3, config.frontCount)) return 'latest';
+  if (intersectionSize(front, p.hot) >= Math.min(5, config.frontCount)) return 'crowding';
+  if (p.priorPicks.some((pick) => intersectionSize(front, pick.front) >= Math.min(5, config.frontCount))) return 'batch';
+  if (accepted.some((pick) => intersectionSize(front, pick.front) >= Math.min(5, config.frontCount))) return 'batch';
+  if (!structureIsValid(front, config)) return 'structure';
+  return null;
 }
 
 function formatTrace(numbers: number[]): string {
-  if (numbers.length === 0) return '未启用灵感映射';
-  return `灵感映射 ${numbers.map((number) => String(number).padStart(2, '0')).join(' / ')}`;
+  return numbers.length ? `灵感映射 ${numbers.map((number) => String(number).padStart(2, '0')).join(' / ')}` : '未启用灵感映射';
 }
 
-export function generateAgentRun(input: NumberAgentInput, random: RandomSource = secureRandom): AgentRun {
+export function generateAgentRun(input: NumberAgentInput, layers?: AgentLayers, random: RandomSource = secureRandom): AgentRun {
   const config = LOTTERY_CONFIGS[input.kind];
   const quantity = Math.max(1, Math.min(10, Math.round(input.quantity)));
-  const previous = parseNumberList(input.previous, config.frontMax).slice(0, config.frontCount);
-  const hot = parseNumberList(input.hot, config.frontMax);
-  const contextFront = contextTargets(input, config.frontMax);
-  const contextBack = contextTargets(input, config.backMax);
-  const inspirationFront = mappedNumbers(input.inspiration ?? '', config.frontMax, 4);
-  const inspirationBack = mappedNumbers(input.inspiration ?? '', config.backMax, 2);
-  const frontWeight = buildWeight(contextFront, inspirationFront);
-  const backWeight = buildWeight(contextBack, inspirationBack);
+  const resolved = layers ?? {
+    probability: analyzeProbabilityLayer(input, [], []),
+    environment: analyzeEnvironmentLayer(input),
+    inspiration: analyzeInspirationLayer(input),
+  };
   const picks: AgentPick[] = [];
-  const maxAttempts = quantity * 600;
+  const rejectionBreakdown: RejectionBreakdown = { history: 0, latest: 0, structure: 0, crowding: 0, batch: 0 };
+  const frontWeight = input.mode === 'fair' ? () => 1 : buildWeight(resolved.environment.frontTargets, resolved.inspiration.frontTargets);
+  const backWeight = input.mode === 'fair' ? () => 1 : buildWeight(resolved.environment.backTargets, resolved.inspiration.backTargets);
+  const maxAttempts = input.mode === 'fair' ? quantity : quantity * 1_200;
   let attempted = 0;
-
   while (picks.length < quantity && attempted < maxAttempts) {
     attempted += 1;
-    const front = weightedSample(config.frontMax, config.frontCount, frontWeight, random);
-    if (!isStructurallyValid(front, config, previous, hot, picks)) continue;
-
-    const back = weightedSample(config.backMax, config.backCount, backWeight, random);
+    const front = sample(config.frontMax, config.frontCount, frontWeight, random);
+    const back = sample(config.backMax, config.backCount, backWeight, random);
+    if (input.mode === 'factor') {
+      const reason = rejectReason(front, back, config, resolved.probability, picks);
+      if (reason) { rejectionBreakdown[reason] += 1; continue; }
+    }
     const shape = analyzeShape(front, config.frontMax);
-    const crowding = crowdingScore(front, config.frontMax, hot, previous);
-    if (crowding > 60) continue;
-
+    const crowding = crowdingScore(front, config.frontMax, resolved.probability.hot, resolved.probability.previousFront);
+    if (input.mode === 'factor' && crowding > 60) { rejectionBreakdown.crowding += 1; continue; }
     picks.push({
       id: `${input.kind}-${attempted}-${front.join('-')}-${back.join('-')}`,
-      front,
-      back,
-      shape,
-      crowdingScore: crowding,
-      reason: `通过结构过滤；三区 ${shape.thirds.join(':')}，跨度 ${shape.span}，仅保留拥挤度不高于 60 的样本。`,
-      inspirationTrace: formatTrace(inspirationFront),
+      front, back, shape, crowdingScore: crowding,
+      reason: input.mode === 'fair' ? '由浏览器安全随机源等权抽取；未应用历史、形态、环境或灵感过滤。' : `通过真实历史、结构与跨批次过滤；三区 ${shape.thirds.join(':')}，跨度 ${shape.span}。`,
+      inspirationTrace: input.mode === 'fair' ? '公平随机：无权重映射' : formatTrace(resolved.inspiration.frontTargets),
     });
   }
-
-  if (picks.length < quantity) {
-    throw new Error('在当前约束下没有生成足够样本，请减少热门号或清空上期号码后重试。');
-  }
-
+  if (picks.length < quantity) throw new Error('当前约束未能生成足够样本，请减少热门号或清空手动上期号码后重试。');
   return {
-    config,
-    picks,
-    attempted,
-    rejected: attempted - picks.length,
-    contextSummary: contextSummary(input),
+    config, mode: input.mode, picks, attempted, rejected: attempted - picks.length, rejectionBreakdown,
+    traces: [resolved.probability.trace, resolved.environment.trace, resolved.inspiration.trace],
+    contextSummary: input.mode === 'fair' ? '公平随机：全部合法号码等权' : resolved.environment.trace.summary,
     generatedAt: new Date().toISOString(),
   };
+}
+
+export function formatAgentRunForClipboard(run: AgentRun): string {
+  const mode = run.mode === 'fair' ? '公平随机' : '因子实验';
+  const lines = run.picks.map((pick, index) => {
+    const front = pick.front.map((number) => String(number).padStart(2, '0')).join(' ');
+    const back = pick.back.map((number) => String(number).padStart(2, '0')).join(' ');
+    return `${String(index + 1).padStart(2, '0')}. ${front} + ${back}`;
+  });
+  return [`${run.config.name}｜${mode}｜${run.picks.length}组`, ...lines].join('\n');
 }

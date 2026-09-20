@@ -98,9 +98,9 @@ export default function HistoryTab() {
 
   return (
     <>
-      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="mb-1 text-xl font-bold">选股历史</h1>
+          <h1 className="mb-1 text-lg font-bold">选股历史</h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
             按日期归档的每一次扫描，可两两对比看哪些新进、哪些跌出。
           </p>
@@ -110,7 +110,7 @@ export default function HistoryTab() {
             <button
               key={r.value}
               onClick={() => setRange(r.value)}
-              className={`min-h-10 rounded-md px-3 text-xs sm:min-h-9 ${
+              className={`min-h-11 rounded-md px-3 text-xs sm:min-h-8 ${
                 range === r.value
                   ? 'bg-[var(--color-primary)] text-[var(--accent-foreground)]'
                   : 'border border-[var(--color-border)] text-[var(--color-text-secondary)]'
@@ -356,7 +356,7 @@ function SnapshotDetail({
           {results.map((r) => (
             <li key={r.code} className="px-3 py-2 text-sm hover:bg-[var(--color-bg-card)]">
               <div className="flex items-center justify-between">
-                <button onClick={() => window.open(`/trade?code=${r.code}`, '_self')} className="min-h-11 flex-1 cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]">
+                <button onClick={() => window.open(`/trade?code=${r.code}`, '_self')} className="min-h-11 flex-1 cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] sm:min-h-8">
                   <span className="font-medium">{r.name}</span>
                   <span className="ml-2 text-xs text-[var(--color-text-secondary)]">{r.code}</span>
                 </button>

@@ -89,7 +89,7 @@ export default function StrategyPickerDialog({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索名称或条件"
-              className="min-h-11 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-[var(--color-text-secondary)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20"
+              className="min-h-11 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-[var(--color-text-secondary)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 sm:min-h-8"
             />
           </div>
           <div className="strategy-picker__filters" role="group" aria-label="按持有周期筛选">

@@ -220,7 +220,7 @@ function PrimaryCard({
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-4) var(--sp-5)',
+        padding: 'var(--sp-3) var(--sp-4)',
         transition: `border-color var(--motion-1) var(--ease)`,
       }}
     >
@@ -409,7 +409,7 @@ function CompactCard({
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-3) var(--sp-4)',
+        padding: 'var(--sp-2) var(--sp-3)',
         transition: `border-color var(--motion-1) var(--ease)`,
       }}
     >

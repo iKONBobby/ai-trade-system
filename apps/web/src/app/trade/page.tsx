@@ -454,8 +454,8 @@ export default function TradePage() {
         className="trade-split"
         style={{
           display: 'grid',
-          gridTemplateColumns: '260px 1fr',
-          gap: 'var(--sp-5)',
+          gridTemplateColumns: '240px 1fr',
+          gap: 'var(--sp-4)',
           alignItems: 'flex-start',
         }}
       >
@@ -522,7 +522,7 @@ export default function TradePage() {
 
       <footer
         style={{
-          marginTop: 'var(--sp-12)',
+          marginTop: 'var(--sp-8)',
           textAlign: 'center',
           fontSize: 'var(--text-xs)',
           color: 'var(--text-3)',
@@ -557,7 +557,7 @@ function AiModeToggle({ mode, onChange }: { mode: AiMode; onChange: (m: AiMode) 
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-pill)',
         padding: 2,
-        marginTop: 'var(--sp-5)',
+        marginTop: 'var(--sp-4)',
       }}
     >
       <PillButton active={mode === 'single'} onClick={() => onChange('single')}>
@@ -586,7 +586,7 @@ function PillButton({
       aria-checked={active}
       onClick={onClick}
       style={{
-        height: 28,
+        height: 'var(--control-sm)',
         padding: '0 var(--sp-3)',
         borderRadius: 'var(--r-pill)',
         background: active ? 'var(--accent)' : 'transparent',
@@ -607,8 +607,8 @@ function EmptyState({ mode }: { mode: 'idle' | 'loading' }) {
   return (
     <div
       style={{
-        marginTop: 'var(--sp-6)',
-        padding: 'var(--sp-16) var(--sp-6)',
+        marginTop: 'var(--sp-4)',
+        padding: 'var(--sp-10) var(--sp-5)',
         textAlign: 'center',
         background: 'var(--surface-1)',
         border: '1px dashed var(--border-2)',
@@ -619,8 +619,8 @@ function EmptyState({ mode }: { mode: 'idle' | 'loading' }) {
         <>
           <svg
             className="animate-spin"
-            width={56}
-            height={56}
+            width={44}
+            height={44}
             viewBox="0 0 24 24"
             fill="none"
             style={{ margin: '0 auto var(--sp-4)', color: 'var(--accent)' }}
@@ -638,8 +638,8 @@ function EmptyState({ mode }: { mode: 'idle' | 'loading' }) {
       ) : (
         <>
           <svg
-            width={56}
-            height={56}
+            width={44}
+            height={44}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"

@@ -68,7 +68,7 @@ export default function SwarmDebateCard({
         background: 'var(--surface-base)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-5)',
+        padding: 'var(--sp-4)',
         marginTop: 'var(--sp-5)',
       }}
     >
@@ -127,7 +127,7 @@ function IdleState({ stockCode, onStart }: { stockCode?: string; onStart?: () =>
         background: 'var(--surface-1)',
         border: '1px dashed var(--border-2)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-5)',
+        padding: 'var(--sp-4)',
         marginTop: 'var(--sp-5)',
         textAlign: 'center',
       }}
@@ -143,7 +143,7 @@ function IdleState({ stockCode, onStart }: { stockCode?: string; onStart?: () =>
         onClick={onStart}
         disabled={!onStart}
         style={{
-          height: 36,
+          height: 'var(--control-md)',
           padding: '0 var(--sp-4)',
           borderRadius: 'var(--r-md)',
           background: 'var(--accent)',

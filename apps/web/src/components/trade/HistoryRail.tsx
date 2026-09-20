@@ -28,7 +28,7 @@ export default function HistoryRail({ items, activeCode, onSelect }: HistoryRail
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-4)',
+        padding: 'var(--sp-3)',
         position: 'sticky',
         top: 'var(--sp-4)',
         alignSelf: 'flex-start',
@@ -49,7 +49,7 @@ export default function HistoryRail({ items, activeCode, onSelect }: HistoryRail
       {items.length === 0 ? (
         <div
           style={{
-            padding: 'var(--sp-4) 0',
+            padding: 'var(--sp-3) 0',
             fontSize: 'var(--text-xs)',
             color: 'var(--text-3)',
             textAlign: 'center',

@@ -48,7 +48,7 @@ export default function RecoPanel({ analysis, config, stockCode }: RecoPanelProp
         background: 'var(--accent-bg)',
         border: '1px solid var(--accent-border)',
         borderRadius: 'var(--r-lg)',
-        padding: 'var(--sp-5)',
+        padding: 'var(--sp-4)',
         marginTop: 'var(--sp-5)',
       }}
     >
@@ -167,14 +167,14 @@ function PrimaryBtn({ children, onClick }: { children: React.ReactNode; onClick?
       type="button"
       onClick={onClick}
       style={{
-        height: 36,
-        padding: '0 var(--sp-4)',
+        height: 'var(--control-md)',
+        padding: '0 var(--sp-3)',
         background: 'var(--accent)',
         border: '1px solid var(--accent)',
         color: 'var(--accent-foreground)',
         borderRadius: 'var(--r-md)',
         fontFamily: 'inherit',
-        fontSize: 'var(--text-body)',
+        fontSize: 'var(--text-sm)',
         fontWeight: 600,
         cursor: 'pointer',
         display: 'inline-flex',
@@ -202,14 +202,14 @@ function SecondaryBtn({ children, onClick }: { children: React.ReactNode; onClic
       type="button"
       onClick={onClick}
       style={{
-        height: 36,
-        padding: '0 var(--sp-4)',
+        height: 'var(--control-md)',
+        padding: '0 var(--sp-3)',
         background: 'var(--surface-1)',
         border: '1px solid var(--border-1)',
         color: 'var(--text-1)',
         borderRadius: 'var(--r-md)',
         fontFamily: 'inherit',
-        fontSize: 'var(--text-body)',
+        fontSize: 'var(--text-sm)',
         fontWeight: 500,
         cursor: 'pointer',
         display: 'inline-flex',

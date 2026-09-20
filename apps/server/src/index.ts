@@ -7,6 +7,7 @@ import { historyRouter } from "./routes/history.js";
 import { favoritesRouter } from "./routes/favorites.js";
 import { backupRouter } from "./routes/backup.js";
 import { swarmRouter } from "./routes/swarm.js";
+import { lotteryRouter } from "./routes/lottery.js";
 import { initStockList } from "./services/screener/engine.js";
 import { initPersistence } from "./services/persistence-container.js";
 import { runRegistry } from "./services/swarm/run-registry.js";
@@ -22,6 +23,7 @@ app.use("/api/history", historyRouter);
 app.use("/api/favorites", favoritesRouter);
 app.use("/api/backup", backupRouter);
 app.use("/api/swarm", swarmRouter);
+app.use("/api/lottery", lotteryRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });

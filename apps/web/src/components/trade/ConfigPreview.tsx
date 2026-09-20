@@ -19,7 +19,7 @@ export default function ConfigPreview({ config, mode }: ConfigPreviewProps) {
     >
       <summary
         style={{
-          padding: 'var(--sp-4) var(--sp-5)',
+          padding: 'var(--sp-3) var(--sp-4)',
           cursor: 'pointer',
           listStyle: 'none',
           display: 'flex',
