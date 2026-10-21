@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { fetchIndices } from '../market.js';
+import { fetchIndices, __resetRealtimeBatchCacheForTest } from '../market.js';
 
 const ORIG_FETCH = globalThis.fetch;
 
@@ -16,6 +16,7 @@ function indexJson(point: number, changePct: number, name = 'IDX') {
 }
 
 afterEach(() => {
+  __resetRealtimeBatchCacheForTest();
   globalThis.fetch = ORIG_FETCH;
   vi.restoreAllMocks();
 });

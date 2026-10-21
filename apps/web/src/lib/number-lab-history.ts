@@ -10,10 +10,11 @@ export type StoredNumberRun = {
   mode: GenerationMode;
   createdAt: string;
   picks: PickReference[];
+  details?: AgentRun;
 };
 
 function browserStorage(): Storage | null {
-  return typeof window === 'undefined' ? null : window.localStorage;
+  try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; }
 }
 
 function validPick(value: unknown): value is PickReference {
@@ -27,8 +28,15 @@ function validRun(value: unknown): value is StoredNumberRun {
   if (!value || typeof value !== 'object') return false;
   const run = value as StoredNumberRun;
   return typeof run.id === 'string' && (run.kind === 'ssq' || run.kind === 'dlt')
-    && (run.mode === 'fair' || run.mode === 'factor') && typeof run.createdAt === 'string'
-    && Array.isArray(run.picks) && run.picks.every(validPick);
+    && (run.mode === 'fair' || run.mode === 'factor') && typeof run.createdAt === 'string' && Number.isFinite(Date.parse(run.createdAt))
+    && Array.isArray(run.picks) && run.picks.every((pick) => {
+      if (!validPick(pick)) return false;
+      const config = LOTTERY_CONFIGS[run.kind];
+      return pick.front.length === config.frontCount && pick.back.length === config.backCount
+        && new Set(pick.front).size === config.frontCount && new Set(pick.back).size === config.backCount
+        && pick.front.every((n) => n >= 1 && n <= config.frontMax)
+        && pick.back.every((n) => n >= 1 && n <= config.backMax);
+    });
 }
 
 export function loadNumberRuns(storage: Storage | null = browserStorage()): StoredNumberRun[] {
@@ -42,11 +50,12 @@ export function loadNumberRuns(storage: Storage | null = browserStorage()): Stor
 }
 
 export function storeNumberRun(run: AgentRun, storage: Storage | null = browserStorage()): StoredNumberRun[] {
-  if (!storage) return [];
+  if (!storage) throw new Error('浏览器本地存储不可用');
   const entry: StoredNumberRun = {
     id: `${run.generatedAt}-${run.config.kind}`,
     kind: run.config.kind,
     mode: run.mode,
+    details: run,
     createdAt: run.generatedAt,
     picks: run.picks.map(({ front, back }) => ({ front, back })),
   };
@@ -60,7 +69,7 @@ export function clearNumberRuns(storage: Storage | null = browserStorage()): voi
 }
 
 export function priorPicksForKind(runs: StoredNumberRun[], kind: LotteryKind): PickReference[] {
-  return runs.filter((run) => run.kind === kind).flatMap((run) => run.picks).slice(0, 200);
+  return runs.filter((run) => run.kind === kind).flatMap((run) => run.picks);
 }
 
 export function formatStoredNumberRunForClipboard(run: StoredNumberRun): string {

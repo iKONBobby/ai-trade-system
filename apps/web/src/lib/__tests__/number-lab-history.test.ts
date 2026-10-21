@@ -29,6 +29,24 @@ function run(kind: 'ssq' | 'dlt', generatedAt: string): AgentRun {
 }
 
 describe('number lab cross-batch history', () => {
+  it('reports unavailable or full storage instead of claiming success', () => {
+    const value = run('ssq', '2026-09-16T01:00:00.000Z');
+    expect(() => storeNumberRun(value, null)).toThrow();
+    const storage = memoryStorage();
+    storage.setItem = () => { throw new Error('quota'); };
+    expect(() => storeNumberRun(value, storage)).toThrow('quota');
+  });
+
+  it('retains run details and uses all retained picks for deduplication', () => {
+    const storage = memoryStorage();
+    const value = run('ssq', '2026-09-16T01:00:00.000Z');
+    value.picks = Array.from({ length: 10 }, () => value.picks[0]);
+    for (let i = 0; i < 25; i++) storeNumberRun(value, storage);
+    const loaded = loadNumberRuns(storage);
+    expect(loaded[0].details).toEqual(value);
+    expect(priorPicksForKind(loaded, 'ssq')).toHaveLength(250);
+  });
+
   it('persists runs and returns only same-kind prior picks', () => {
     const storage = memoryStorage();
     storeNumberRun(run('ssq', '2026-09-16T01:00:00.000Z'), storage);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeProbabilityLayer, analyzeShape, formatAgentRunForClipboard, generateAgentRun, parseNumberList } from '../number-agent';
+import { analyzeEnvironmentLayer, uniformIndex, analyzeProbabilityLayer, analyzeShape, formatAgentRunForClipboard, generateAgentRun, parseNumberList } from '../number-agent';
 
 function seededRandom(seed = 42) {
   let state = seed >>> 0;
@@ -10,8 +10,46 @@ function seededRandom(seed = 42) {
 }
 
 describe('number agent', () => {
+  const base = { kind: 'ssq', mode: 'factor', quantity: 10, contextMode: 'balanced' } as const;
+
+  it('rejects invalid input rather than changing its meaning', () => {
+    for (const value of ['-5', '1.5', '34', 'hello']) expect(() => parseNumberList(value, 33)).toThrow();
+    for (const previous of ['1 2', '1 2 3 4 5 6 7']) {
+      expect(() => analyzeProbabilityLayer({ ...base, previous }, [], [])).toThrow();
+    }
+    expect(() => generateAgentRun({ ...base, quantity: NaN })).toThrow();
+  });
+
+  it('strictly excludes blacklisted numbers', () => {
+    const run = generateAgentRun({ ...base, hot: '1 2 3 4' }, undefined, seededRandom());
+    expect(run.picks.every((pick) => pick.front.every((n) => n > 4))).toBe(true);
+    expect(() => generateAgentRun({ ...base, hot: Array.from({ length: 33 }, (_, i) => i + 1).join(' ') })).toThrow('可用号码不足');
+  });
+
+  it('keeps empty signal inputs neutral', () => {
+    const layer = analyzeEnvironmentLayer({ ...base, contextMode: 'signal', contextText: ' ', drawLabel: '' });
+    expect(layer.frontTargets).toEqual([]);
+    expect(layer.backTargets).toEqual([]);
+  });
+
+  it('rejects the incomplete integer bucket before drawing a uniform index', () => {
+    const values = [4294967295 / 4294967296, 2 / 4294967296];
+    expect(uniformIndex(3, () => values.shift()!)).toBe(2);
+    expect(values).toHaveLength(0);
+    expect(uniformIndex(16, () => 0)).toBe(0);
+    expect(() => uniformIndex(3, () => NaN)).toThrow();
+  });
+
+  it('captures the input and filtering context for later inspection', () => {
+    const input = { ...base, inspiration: 'test' };
+    const run = generateAgentRun(input, undefined, seededRandom());
+    expect(run.audit?.input).toEqual(input);
+    expect(run.audit?.version).toBe(2);
+    expect(run.audit?.environment).toBeDefined();
+  });
+
   it('parses, de-duplicates and bounds number input', () => {
-    expect(parseNumberList('01 2, 2 / 34 -1 8', 33)).toEqual([1, 2, 8]);
+    expect(parseNumberList('01 2, 2 / 8', 33)).toEqual([1, 2, 8]);
   });
 
   it('calculates explainable shape metrics', () => {

@@ -57,6 +57,7 @@ export default function ScannerTab() {
   const [detailCode, setDetailCode] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [exportingImage, setExportingImage] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -382,6 +383,62 @@ export default function ScannerTab() {
     URL.revokeObjectURL(url);
   }, [results]);
 
+  const exportImage = useCallback(async () => {
+    // Filter before deduplicating: a stock qualifies if any strategy scores it above 80.
+    const stocks = Array.from(new Map(
+      Object.values(results).flat().filter((stock) => stock.score > 80)
+        .map((stock) => [stock.code, stock]),
+    ).values());
+    setError('');
+    setInfo('');
+    if (stocks.length === 0) {
+      setInfo('暂无分数大于 80 的股票可导出');
+      return;
+    }
+
+    setExportingImage(true);
+    try {
+      await document.fonts.ready;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('当前浏览器不支持图片导出');
+
+      const font = '24px "PingFang SC", "Microsoft YaHei", sans-serif';
+      const lines = stocks.map((stock) => `${stock.code}  ${stock.name}`);
+      ctx.font = font;
+      const width = Math.ceil(Math.max(320, ...lines.map((line) => ctx.measureText(line).width + 64)));
+      const height = 64 + lines.length * 44;
+      // Keep long lists within common browser canvas dimension limits.
+      const scale = Math.min(2, 16000 / Math.max(width, height));
+      canvas.width = Math.ceil(width * scale);
+      canvas.height = Math.ceil(height * scale);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.font = font;
+      ctx.fillStyle = '#111827';
+      ctx.textBaseline = 'middle';
+      lines.forEach((line, index) => ctx.fillText(line, 32, 54 + index * 44));
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => value ? resolve(value) : reject(new Error('图片生成失败，请重试')), 'image/png');
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `screener_above80_${new Date().toISOString().slice(0, 10)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setInfo(`已导出图片：${stocks.length} 只分数大于 80 的股票`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '图片导出失败，请重试');
+    } finally {
+      setExportingImage(false);
+    }
+  }, [results]);
+
   const toggleStrategy = (id: string) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : prev.length < 3 ? [...prev, id] : prev,
@@ -580,12 +637,23 @@ export default function ScannerTab() {
         )}
 
         {status === 'done' && (
-          <button
-            onClick={exportCSV}
-            className="min-h-11 cursor-pointer rounded-md border border-[var(--color-border)] px-3 text-xs transition-colors hover:border-[var(--color-primary)]/50 sm:min-h-8"
-          >
-            导出 CSV
-          </button>
+          <>
+            <button
+              onClick={exportCSV}
+              className="min-h-11 cursor-pointer rounded-md border border-[var(--color-border)] px-3 text-xs transition-colors hover:border-[var(--color-primary)]/50 sm:min-h-8"
+            >
+              导出 CSV
+            </button>
+            <button
+              onClick={exportImage}
+              disabled={exportingImage}
+              aria-busy={exportingImage}
+              title="导出全部策略中分数大于 80 的股票代码和名称，按股票代码去重"
+              className="min-h-11 cursor-pointer rounded-md border border-[var(--color-border)] px-3 text-xs transition-colors hover:border-[var(--color-primary)]/50 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-8"
+            >
+              {exportingImage ? '正在导出…' : '导出图片'}
+            </button>
+          </>
         )}
 
       </div>

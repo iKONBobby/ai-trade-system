@@ -3,6 +3,7 @@ import {
   fetchRealtime,
   fetchRealtimeBatch,
   fetchRealtimeTencent,
+  fetchRealtimeBatchTencent,
   fetchRealtimeFromSource,
   fetchKLine,
   UpstreamUnavailableError,
@@ -28,7 +29,7 @@ function makeOk(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
-function makeTencentResponse(): Response {
+function makeTencentResponse(code = '600519'): Response {
   const fields = Array.from({ length: 39 }, () => '');
   fields[1] = '贵州茅台';
   fields[3] = '1688.50';
@@ -39,7 +40,7 @@ function makeTencentResponse(): Response {
   fields[33] = '1700.00';
   fields[34] = '1650.00';
   fields[38] = '2.10';
-  return new Response(`v_sh600519="${fields.join('~')}";`, { status: 200 });
+  return new Response(`v_sh${code}="${fields.join('~')}";`, { status: 200 });
 }
 
 /** Emulate undici's connect-timeout shape so isRetryableNetworkError returns true. */
@@ -83,6 +84,27 @@ describe('fetchRealtimeBatch', () => {
 });
 
 describe('fetchRealtime retry behavior', () => {
+  it('retries native AbortSignal.timeout TimeoutError failures', async () => {
+    const reason = new DOMException('The operation timed out', 'TimeoutError');
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.abort(reason));
+    const spy = vi.fn()
+      .mockRejectedValueOnce(reason)
+      .mockResolvedValueOnce(makeOk(makeRealtimeJson()));
+    globalThis.fetch = spy as typeof fetch;
+
+    const promise = fetchRealtime('600519', { retries: 1 });
+    await vi.advanceTimersByTimeAsync(500);
+    expect((await promise).code).toBe('600519');
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('normalizes exhausted native timeouts to an upstream error', async () => {
+    const reason = new DOMException('The operation timed out', 'TimeoutError');
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.abort(reason));
+    globalThis.fetch = vi.fn().mockRejectedValue(reason) as typeof fetch;
+    await expect(fetchRealtime('600519')).rejects.toBeInstanceOf(UpstreamUnavailableError);
+  });
+
   it('returns on first success without retry', async () => {
     const spy = vi.fn(async () => makeOk(makeRealtimeJson()));
     globalThis.fetch = spy as unknown as typeof fetch;
@@ -175,6 +197,47 @@ describe('fetchRealtime retry behavior', () => {
 });
 
 describe('Tencent realtime source', () => {
+  it('fetches stocks missing from a fresh cache instead of returning an empty result', async () => {
+    const spy = vi.fn()
+      .mockResolvedValueOnce(makeTencentResponse())
+      .mockResolvedValueOnce(makeTencentResponse('600000'));
+    globalThis.fetch = spy as typeof fetch;
+
+    await fetchRealtimeBatchTencent(['600519']);
+    const result = await fetchRealtimeBatchTencent(['600000']);
+    expect(result.get('600000')?.price).toBe(1688.5);
+    expect(spy).toHaveBeenCalledTimes(2);
+    await fetchRealtimeBatchTencent(['600000']);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('auto switches immediately instead of retrying the failed primary and then skips its open circuit', async () => {
+    const spy = vi.fn(async (input) => {
+      if (String(input).includes('eastmoney')) throw makeConnectTimeoutError();
+      return makeTencentResponse();
+    });
+    globalThis.fetch = spy as typeof fetch;
+    for (let n = 0; n < 4; n++) {
+      expect((await fetchRealtimeFromSource('600519', 'auto', { retries: 2 })).source).toBe('tencent');
+    }
+    expect(spy.mock.calls.filter(([url]) => String(url).includes('eastmoney'))).toHaveLength(3);
+    expect(spy.mock.calls.filter(([url]) => String(url).includes('gtimg'))).toHaveLength(4);
+  });
+
+  it('switches on HTTP 429 without retrying or consuming a throttle response as quote data', async () => {
+    globalThis.fetch = vi.fn(async (input) => String(input).includes('eastmoney')
+      ? new Response('rate limited', { status: 429 }) : makeTencentResponse()) as typeof fetch;
+    expect((await fetchRealtimeFromSource('600519', 'auto', { retries: 2 })).source).toBe('tencent');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('caller cancellation stops automatic failover', async () => {
+    const controller = new AbortController();
+    globalThis.fetch = vi.fn(async () => { controller.abort(); throw controller.signal.reason; }) as typeof fetch;
+    await expect(fetchRealtimeFromSource('600519', 'auto', { signal: controller.signal })).rejects.toThrow();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('parses a Tencent quote and reports the actual provider', async () => {
     globalThis.fetch = vi.fn(async () => makeTencentResponse()) as unknown as typeof fetch;
 

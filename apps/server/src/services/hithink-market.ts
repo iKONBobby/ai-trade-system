@@ -1,3 +1,4 @@
+import { protectedRequest, checkCancelled } from './market-resilience.js';
 import type { KLine, MarketData } from '@trade/shared';
 
 const DEFAULT_BASE_URL = 'https://fuyao.aicubes.cn';
@@ -6,6 +7,8 @@ const MAX_ATTEMPTS = 3;
 const CIRCUIT_BREAK_MS = 60_000;
 
 export interface HithinkFetchOpts {
+  rateLimit?: boolean;
+  retries?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -134,20 +137,23 @@ async function callApi<T>(
   const url = new URL(pathname, `${baseUrl()}/`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 
+  const attempts = Math.min(MAX_ATTEMPTS, (opts.retries ?? 2) + 1);
   let lastError: unknown;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (opts.signal?.aborted) throw abortError();
-    const timeout = AbortSignal.timeout(opts.timeoutMs ?? 8_000);
-    const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
-
     try {
-      const response = await fetch(url, {
-        headers: { 'X-api-key': apiKey, Accept: 'application/json' },
-        signal,
-      });
+      const response = await protectedRequest(url.host, opts.signal, async () => {
+        checkCancelled(opts.signal);
+        const timeout = AbortSignal.timeout(opts.timeoutMs ?? 8_000);
+        const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
+        const res = await fetch(url, { headers: { 'X-api-key': apiKey, Accept: 'application/json' }, signal });
+        const body = await res.arrayBuffer();
+        if (res.status === 429 || res.status >= 500) throw Object.assign(new Error('HiThink HTTP unavailable'), { status: res.status });
+        return new Response(body, { status: res.status, headers: res.headers });
+      }, opts.rateLimit);
       if (!response.ok) {
         const error = new HithinkApiError(`HiThink HTTP ${response.status}`);
-        if ((response.status === 429 || response.status >= 500) && attempt < MAX_ATTEMPTS - 1) {
+        if ((response.status === 429 || response.status >= 500) && attempt < attempts - 1) {
           lastError = error;
         } else {
           throw error;
@@ -160,7 +166,7 @@ async function callApi<T>(
           envelope.code,
           envelope.request_id,
         );
-        if (retryableBusinessCode(envelope.code) && attempt < MAX_ATTEMPTS - 1) {
+        if (retryableBusinessCode(envelope.code) && attempt < attempts - 1) {
           lastError = error;
         } else {
           throw error;
@@ -173,14 +179,14 @@ async function callApi<T>(
         if (shouldOpenCircuit(error)) unavailableUntil = Date.now() + CIRCUIT_BREAK_MS;
         throw error;
       }
-      if (attempt >= MAX_ATTEMPTS - 1) break;
+      if (attempt >= attempts - 1) break;
     }
 
     await delay(500 * Math.pow(2, attempt), opts.signal);
   }
 
   unavailableUntil = Date.now() + CIRCUIT_BREAK_MS;
-  throw new HithinkApiError('HiThink service unavailable after 3 attempts', undefined, undefined, lastError);
+  throw new HithinkApiError(`HiThink service unavailable after ${attempts} attempts`, undefined, undefined, lastError);
 }
 
 async function resolveName(code: string, opts: HithinkFetchOpts): Promise<string> {

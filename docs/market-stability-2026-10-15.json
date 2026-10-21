@@ -1,0 +1,334 @@
+{
+  "at": "2026-10-15T08:37:00.071Z",
+  "hithinkConfigured": true,
+  "samples": [
+    {
+      "label": "eastmoney:0",
+      "ok": true,
+      "ms": 255,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "tencent:0",
+      "ok": true,
+      "ms": 67,
+      "data": {
+        "code": "600519",
+        "source": "tencent",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "auto:0",
+      "ok": true,
+      "ms": 40,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "eastmoney:1",
+      "ok": true,
+      "ms": 40,
+      "data": {
+        "code": "000001",
+        "source": "eastmoney",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "tencent:1",
+      "ok": true,
+      "ms": 17,
+      "data": {
+        "code": "000001",
+        "source": "tencent",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "auto:1",
+      "ok": true,
+      "ms": 184,
+      "data": {
+        "code": "000001",
+        "source": "eastmoney",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "eastmoney:2",
+      "ok": true,
+      "ms": 49,
+      "data": {
+        "code": "300750",
+        "source": "eastmoney",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "tencent:2",
+      "ok": true,
+      "ms": 16,
+      "data": {
+        "code": "300750",
+        "source": "tencent",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "auto:2",
+      "ok": true,
+      "ms": 192,
+      "data": {
+        "code": "300750",
+        "source": "eastmoney",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "eastmoney:3",
+      "ok": true,
+      "ms": 42,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "tencent:3",
+      "ok": true,
+      "ms": 23,
+      "data": {
+        "code": "600519",
+        "source": "tencent",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "auto:3",
+      "ok": true,
+      "ms": 177,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "eastmoney:4",
+      "ok": true,
+      "ms": 43,
+      "data": {
+        "code": "000001",
+        "source": "eastmoney",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "tencent:4",
+      "ok": true,
+      "ms": 17,
+      "data": {
+        "code": "000001",
+        "source": "tencent",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "auto:4",
+      "ok": true,
+      "ms": 181,
+      "data": {
+        "code": "000001",
+        "source": "eastmoney",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "eastmoney:5",
+      "ok": true,
+      "ms": 45,
+      "data": {
+        "code": "300750",
+        "source": "eastmoney",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "tencent:5",
+      "ok": true,
+      "ms": 13,
+      "data": {
+        "code": "300750",
+        "source": "tencent",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "auto:5",
+      "ok": true,
+      "ms": 186,
+      "data": {
+        "code": "300750",
+        "source": "eastmoney",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "eastmoney:6",
+      "ok": true,
+      "ms": 43,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "tencent:6",
+      "ok": true,
+      "ms": 13,
+      "data": {
+        "code": "600519",
+        "source": "tencent",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "auto:6",
+      "ok": true,
+      "ms": 187,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "eastmoney:7",
+      "ok": true,
+      "ms": 40,
+      "data": {
+        "code": "000001",
+        "source": "eastmoney",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "tencent:7",
+      "ok": true,
+      "ms": 18,
+      "data": {
+        "code": "000001",
+        "source": "tencent",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "auto:7",
+      "ok": true,
+      "ms": 247,
+      "data": {
+        "code": "000001",
+        "source": "eastmoney",
+        "price": 11.41
+      }
+    },
+    {
+      "label": "eastmoney:8",
+      "ok": true,
+      "ms": 52,
+      "data": {
+        "code": "300750",
+        "source": "eastmoney",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "tencent:8",
+      "ok": true,
+      "ms": 11,
+      "data": {
+        "code": "300750",
+        "source": "tencent",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "auto:8",
+      "ok": true,
+      "ms": 184,
+      "data": {
+        "code": "300750",
+        "source": "eastmoney",
+        "price": 278.5
+      }
+    },
+    {
+      "label": "eastmoney:9",
+      "ok": true,
+      "ms": 36,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "tencent:9",
+      "ok": true,
+      "ms": 13,
+      "data": {
+        "code": "600519",
+        "source": "tencent",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "auto:9",
+      "ok": true,
+      "ms": 194,
+      "data": {
+        "code": "600519",
+        "source": "eastmoney",
+        "price": 1312.97
+      }
+    },
+    {
+      "label": "auto:batch",
+      "ok": true,
+      "ms": 593,
+      "data": {
+        "requested": 100,
+        "received": 100,
+        "sources": [
+          "tencent"
+        ]
+      }
+    },
+    {
+      "label": "eastmoney:kline",
+      "ok": false,
+      "ms": 158,
+      "error": "Failed to reach push2his.eastmoney.com after 1 attempt(s)"
+    },
+    {
+      "label": "configured:kline",
+      "ok": true,
+      "ms": 13625,
+      "data": {
+        "rows": 60,
+        "latestDate": "2026-10-15"
+      }
+    }
+  ],
+  "scope": "Read-only local-host smoke test after market resilience changes; short sample outside A-share trading hours, not a long-term availability or freshness guarantee."
+}

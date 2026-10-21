@@ -1,3 +1,4 @@
+import { marketLog } from '../market-resilience.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { MarketData, RealtimeSourcePreference, ScreenerResult, Strategy, TriggeredFactor, StockListItem, ScanSnapshot } from '@trade/shared';
@@ -683,8 +684,9 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
   let realtimeSnapshot = new Map<string, MarketData>();
   try {
     realtimeSnapshot = await fetchRealtimeBatchFromSource(stocks.map((stock) => stock.code), boards.realtimeSource ?? 'auto', {
-      retries: 2,
-      timeoutMs: 8000,
+      retries: 0,
+      timeoutMs: 2500,
+      rateLimit: true,
       signal,
     });
     console.log(`[SCREENER] Realtime batch loaded: ${realtimeSnapshot.size}/${stocks.length}`);
@@ -700,80 +702,37 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
   }
   const candidates: ScannableStock[] = [];
 
-  // Dynamic concurrency using simple semaphore
-  let concurrency = 20;
-  let consecutiveTimeouts = 0;
-  let consecutiveSuccesses = 0;
-  let activeRequests = 0;
-  const pending: Array<() => void> = [];
-
-  function releaseSlot() {
-    activeRequests--;
-    const next = pending.shift();
-    if (next) {
-      activeRequests++;
-      next();
-    }
-  }
-
-  function acquireSlot(): Promise<void> {
-    if (activeRequests < concurrency) {
-      activeRequests++;
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      pending.push(resolve);
-    });
-  }
-
-  function adjustConcurrency(timedOut: boolean) {
-    if (timedOut) {
-      consecutiveTimeouts++;
-      consecutiveSuccesses = 0;
-      if (consecutiveTimeouts >= 5 && concurrency > 5) {
-        concurrency = Math.max(5, concurrency === 20 ? 10 : 5);
-        consecutiveTimeouts = 0;
-        console.log(`[SCREENER] Concurrency reduced to ${concurrency}`);
-      }
-    } else {
-      consecutiveSuccesses++;
-      consecutiveTimeouts = 0;
-      if (consecutiveSuccesses >= 50 && concurrency < 20) {
-        concurrency = Math.min(20, concurrency === 5 ? 10 : 20);
-        consecutiveSuccesses = 0;
-        console.log(`[SCREENER] Concurrency recovered to ${concurrency}`);
-      }
-    }
-  }
-
-  const promises: Promise<void>[] = [];
-
-  for (const stock of stocks) {
-    if (signal.aborted) break;
-
-    const p = (async () => {
-      await acquireSlot();
-      if (signal.aborted) { releaseSlot(); return; }
-
+  // Bounded workers; upstream pacing is shared across jobs in market-resilience.
+  let nextStock = 0;
+  let fallbackRequests = 0;
+  let missingSkipped = 0;
+  const runWorker = async () => {
+    while (!signal.aborted && nextStock < stocks.length) {
+      const stock = stocks[nextStock++];
       try {
         // Phase 1: pre-filter with realtime data
         let market: MarketData;
         try {
-          market = realtimeSnapshot.get(stock.code) ?? await fetchRealtimeFromSource(
+          const cachedQuote = realtimeSnapshot.get(stock.code);
+          if (!cachedQuote && fallbackRequests >= 50) {
+            missingSkipped++;
+            job.progress.failed++;
+            continue;
+          }
+          if (!cachedQuote) fallbackRequests++;
+          market = cachedQuote ?? await fetchRealtimeFromSource(
             stock.code,
             boards.realtimeSource ?? 'auto',
-            { retries: 1, timeoutMs: 6000, signal },
+            { retries: 0, timeoutMs: 2500, rateLimit: true, signal },
           );
           if (!market.name) market = { ...market, name: stock.name };
         } catch {
           job.progress.failed++;
-          adjustConcurrency(true);
-          return; // finally still runs and increments scanned exactly once
+          continue; // finally increments scanned exactly once
         }
 
         if (!prefilterStock(market)) {
-          adjustConcurrency(false);
-          return;
+          continue;
         }
 
         // Phase 2: K-line + factor scoring
@@ -784,35 +743,32 @@ async function runScan(job: ScanningJob, marketFilter?: string, boards: ScanBoar
             ? cachedHistory.slice(-lookbackDays)
             : await fetchKLine(stock.code, lookbackDays, {
               signal,
+              timeoutMs: 2500,
+              retries: 0,
+              rateLimit: true,
               skipTushare: true,
               skipBaoStock: true,
               skipHithink: true,
             });
         } catch {
           job.progress.failed++;
-          adjustConcurrency(true);
-          return;
+          continue;
         }
 
         if (klines.length < 20) {
           job.progress.failed++;
-          adjustConcurrency(false);
-          return;
+          continue;
         }
-
-        adjustConcurrency(false);
 
         candidates.push({ stock, market, klines });
       } finally {
         job.progress.scanned++;
-        releaseSlot();
       }
-    })();
-
-    promises.push(p);
-  }
-
-  await Promise.allSettled(promises);
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, runWorker));
+  marketLog('scan_fetch_summary', { jobId: job.id, stocks: stocks.length, snapshot: realtimeSnapshot.size,
+    fallbackRequests, missingSkipped, failed: job.progress.failed, elapsedMs: Date.now() - job.startedAt });
 
   if (signal.aborted) return;
 

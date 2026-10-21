@@ -58,6 +58,7 @@ export type LayerTrace = {
 
 export type ProbabilityLayer = {
   trace: LayerTrace;
+  history: LotteryDraw[];
   historyCount: number;
   latest: LotteryDraw | null;
   exactHistory: Set<string>;
@@ -92,6 +93,7 @@ export type AgentRun = {
   traces: LayerTrace[];
   contextSummary: string;
   generatedAt: string;
+  audit?: { version: number; input: NumberAgentInput; history: LotteryDraw[]; priorPicks: PickReference[]; environment: WeightLayer; inspiration: WeightLayer };
 };
 
 export const LOTTERY_CONFIGS: Record<LotteryKind, LotteryConfig> = {
@@ -112,8 +114,11 @@ function secureRandom(): number {
 
 export function parseNumberList(value: string | undefined, max: number): number[] {
   if (!value) return [];
-  const matches = value.match(/\d+/g) ?? [];
-  return Array.from(new Set(matches.map(Number).filter((item) => item >= 1 && item <= max)));
+  const tokens = value.trim().split(/[\s,，、;；/]+/).filter(Boolean);
+  if (tokens.some((token) => !/^\d+$/.test(token) || Number(token) < 1 || Number(token) > max)) {
+    throw new Error(`请输入 1–${max} 的整数号码，以空格或逗号分隔。`);
+  }
+  return Array.from(new Set(tokens.map(Number)));
 }
 
 function hashText(value: string): number {
@@ -138,17 +143,33 @@ function mappedNumbers(value: string, max: number, count: number): number[] {
   return Array.from(result);
 }
 
-function sample(max: number, count: number, weightFor: (number: number) => number, random: RandomSource): number[] {
+export function uniformIndex(max: number, random: RandomSource): number {
+  const range = 4_294_967_296;
+  const limit = range - range % max;
+  for (let attempt = 0; attempt < 128; attempt += 1) {
+    const value = random();
+    if (!Number.isFinite(value) || value < 0 || value >= 1) throw new Error('随机源返回了无效值。');
+    const integer = Math.floor(value * range);
+    if (integer < limit) return integer % max;
+  }
+  throw new Error('随机源未能提供有效样本，请重试。');
+}
+
+function sample(max: number, count: number, weightFor: (number: number) => number, random: RandomSource, uniform = false): number[] {
   const pool = Array.from({ length: max }, (_, index) => index + 1);
   const selected: number[] = [];
   while (selected.length < count) {
+    if (uniform) {
+      selected.push(pool.splice(uniformIndex(pool.length, random), 1)[0]);
+      continue;
+    }
     const weights = pool.map((number) => Math.max(0.05, weightFor(number)));
     const total = weights.reduce((sum, weight) => sum + weight, 0);
     let cursor = random() * total;
     let selectedIndex = pool.length - 1;
     for (let index = 0; index < pool.length; index += 1) {
       cursor -= weights[index];
-      if (cursor <= 0) { selectedIndex = index; break; }
+      if (cursor < 0) { selectedIndex = index; break; }
     }
     selected.push(pool[selectedIndex]);
     pool.splice(selectedIndex, 1);
@@ -203,11 +224,12 @@ export function analyzeProbabilityLayer(input: NumberAgentInput, history: Lotter
   if (input.mode === 'fair') {
     return {
       trace: { code: 'P', status: 'skipped', summary: '公平模式不读取历史过滤条件', metrics: ['仅校验彩种号码范围与不重复'] },
-      historyCount: history.length, latest: history[0] ?? null, exactHistory: new Set(), previousFront: [], hot: [], priorPicks: [], frequentFront: [],
+      history: [], historyCount: history.length, latest: history[0] ?? null, exactHistory: new Set(), previousFront: [], hot: [], priorPicks: [], frequentFront: [],
     };
   }
   const latest = history[0] ?? null;
-  const manualPrevious = parseNumberList(input.previous, config.frontMax).slice(0, config.frontCount);
+  const manualPrevious = parseNumberList(input.previous, config.frontMax);
+  if (input.previous?.trim() && manualPrevious.length !== config.frontCount) throw new Error(`上期号码必须包含 ${config.frontCount} 个不同号码。`);
   const previousFront = manualPrevious.length === config.frontCount ? manualPrevious : latest?.front ?? [];
   const hot = parseNumberList(input.hot, config.frontMax);
   const frequentFront = frequencyLeaders(history, Math.min(8, config.frontMax));
@@ -221,6 +243,7 @@ export function analyzeProbabilityLayer(input: NumberAgentInput, history: Lotter
         frequentFront.length ? `高频观察 ${frequentFront.map((number) => String(number).padStart(2, '0')).join(' / ')}` : '无频次样本',
       ],
     },
+    history: history.map((draw) => ({ ...draw, front: [...draw.front], back: [...draw.back] })),
     historyCount: history.length,
     latest,
     exactHistory: new Set(history.map((draw) => combinationKey(draw.front, draw.back))),
@@ -242,7 +265,7 @@ export function analyzeEnvironmentLayer(input: NumberAgentInput): WeightLayer {
   }
   const source = input.contextMode === 'calendar'
     ? `${shanghaiDate()}|${input.drawLabel ?? ''}`
-    : input.contextMode === 'signal' ? `${input.contextText ?? ''}|${input.drawLabel ?? ''}` : '';
+    : input.contextMode === 'signal' ? [input.contextText?.trim(), input.drawLabel?.trim()].filter(Boolean).join('|') : '';
   const frontTargets = mappedNumbers(source, config.frontMax, 5);
   const backTargets = mappedNumbers(source, config.backMax, 2);
   const label = input.contextMode === 'calendar' ? '上海时区日期与期号' : input.contextMode === 'signal' ? '自定义关键词与期号' : '均衡设置';
@@ -320,7 +343,7 @@ function buildWeight(environment: number[], inspiration: number[]) {
 function rejectReason(front: number[], back: number[], config: LotteryConfig, p: ProbabilityLayer, accepted: AgentPick[]): RejectionReason | null {
   if (p.exactHistory.has(combinationKey(front, back))) return 'history';
   if (p.previousFront.length && intersectionSize(front, p.previousFront) >= Math.min(3, config.frontCount)) return 'latest';
-  if (intersectionSize(front, p.hot) >= Math.min(5, config.frontCount)) return 'crowding';
+  if (intersectionSize(front, p.hot) > 0) return 'crowding';
   if (p.priorPicks.some((pick) => intersectionSize(front, pick.front) >= Math.min(5, config.frontCount))) return 'batch';
   if (accepted.some((pick) => intersectionSize(front, pick.front) >= Math.min(5, config.frontCount))) return 'batch';
   if (!structureIsValid(front, config)) return 'structure';
@@ -333,12 +356,14 @@ function formatTrace(numbers: number[]): string {
 
 export function generateAgentRun(input: NumberAgentInput, layers?: AgentLayers, random: RandomSource = secureRandom): AgentRun {
   const config = LOTTERY_CONFIGS[input.kind];
-  const quantity = Math.max(1, Math.min(10, Math.round(input.quantity)));
+  if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 10) throw new Error('生成组数必须是 1–10 的整数。');
+  const quantity = input.quantity;
   const resolved = layers ?? {
     probability: analyzeProbabilityLayer(input, [], []),
     environment: analyzeEnvironmentLayer(input),
     inspiration: analyzeInspirationLayer(input),
   };
+  if (input.mode === 'factor' && config.frontMax - resolved.probability.hot.length < config.frontCount) throw new Error('黑名单排除后可用号码不足，请减少黑名单号码。');
   const picks: AgentPick[] = [];
   const rejectionBreakdown: RejectionBreakdown = { history: 0, latest: 0, structure: 0, crowding: 0, batch: 0 };
   const frontWeight = input.mode === 'fair' ? () => 1 : buildWeight(resolved.environment.frontTargets, resolved.inspiration.frontTargets);
@@ -347,8 +372,8 @@ export function generateAgentRun(input: NumberAgentInput, layers?: AgentLayers, 
   let attempted = 0;
   while (picks.length < quantity && attempted < maxAttempts) {
     attempted += 1;
-    const front = sample(config.frontMax, config.frontCount, frontWeight, random);
-    const back = sample(config.backMax, config.backCount, backWeight, random);
+    const front = sample(config.frontMax, config.frontCount, frontWeight, random, input.mode === 'fair');
+    const back = sample(config.backMax, config.backCount, backWeight, random, input.mode === 'fair');
     if (input.mode === 'factor') {
       const reason = rejectReason(front, back, config, resolved.probability, picks);
       if (reason) { rejectionBreakdown[reason] += 1; continue; }
@@ -363,11 +388,12 @@ export function generateAgentRun(input: NumberAgentInput, layers?: AgentLayers, 
       inspirationTrace: input.mode === 'fair' ? '公平随机：无权重映射' : formatTrace(resolved.inspiration.frontTargets),
     });
   }
-  if (picks.length < quantity) throw new Error('当前约束未能生成足够样本，请减少热门号或清空手动上期号码后重试。');
+  if (picks.length < quantity) throw new Error('当前约束未能生成足够样本，请减少黑名单号码、检查上期号码或清理跨批次记录后重试。');
   return {
     config, mode: input.mode, picks, attempted, rejected: attempted - picks.length, rejectionBreakdown,
     traces: [resolved.probability.trace, resolved.environment.trace, resolved.inspiration.trace],
     contextSummary: input.mode === 'fair' ? '公平随机：全部合法号码等权' : resolved.environment.trace.summary,
+    audit: { version: 2, input: { ...input }, history: resolved.probability.history, priorPicks: resolved.probability.priorPicks, environment: resolved.environment, inspiration: resolved.inspiration },
     generatedAt: new Date().toISOString(),
   };
 }

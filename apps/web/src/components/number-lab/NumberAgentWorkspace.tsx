@@ -87,6 +87,7 @@ export default function NumberAgentWorkspace() {
   const [activeStep, setActiveStep] = useState(-1);
   const [traces, setTraces] = useState<LayerTrace[]>([]);
   const [error, setError] = useState('');
+  const [saveWarning, setSaveWarning] = useState('');
   const [history, setHistory] = useState<LotteryHistoryResponse | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
@@ -134,6 +135,8 @@ export default function NumberAgentWorkspace() {
   };
 
   const changeKind = (kind: LotteryKind) => {
+    if (isRunning || kind === form.kind) return;
+    setError(''); setSaveWarning('');
     setRun(null); setTraces([]); setActiveStep(-1); setCopyState('idle');
     setForm((current) => ({ ...current, kind, previous: '', hot: '' }));
   };
@@ -143,7 +146,7 @@ export default function NumberAgentWorkspace() {
       setError('因子实验需要先加载真实历史数据；也可以切换到公平随机模式。');
       return;
     }
-    setError(''); setRun(null); setTraces([]); setIsRunning(true); setActiveStep(0); setCopyState('idle');
+    setSaveWarning(''); setError(''); setRun(null); setTraces([]); setIsRunning(true); setActiveStep(0); setCopyState('idle');
     try {
       await nextFrame();
       const probability = analyzeProbabilityLayer(form, history?.kind === form.kind ? history.draws : [], priorPicks);
@@ -158,7 +161,7 @@ export default function NumberAgentWorkspace() {
       await nextFrame();
       const next = generateAgentRun(form, { probability, environment, inspiration });
       setRun(next);
-      setStoredRuns(storeNumberRun(next));
+      try { setStoredRuns(storeNumberRun(next)); } catch { setSaveWarning('号码已生成，但未能保存到当前浏览器。请复制结果；本次号码未加入跨批次记录。'); }
       setActiveStep(3);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '生成失败，请调整参数后重试。');
@@ -228,6 +231,19 @@ export default function NumberAgentWorkspace() {
           <Surface className="number-panel number-form">
             <div className="number-panel__head"><div><span className="section-label">Mode & input</span><h2>实验参数</h2></div><span className="number-panel__meta mono">SECURE RNG</span></div>
 
+            <fieldset className="number-mode number-mode--primary" disabled={isRunning}>
+              <legend>彩种</legend>
+              <div className="number-segment number-segment--two">
+                {(['ssq', 'dlt'] as const).map((kind) => {
+                  const lottery = LOTTERY_CONFIGS[kind];
+                  return <button key={kind} type="button" aria-pressed={form.kind === kind} onClick={() => changeKind(kind)}>
+                    <strong>{lottery.name}</strong><small>{lottery.frontLabel} {lottery.frontCount} 个 + {lottery.backLabel} {lottery.backCount} 个</small>
+                  </button>;
+                })}
+              </div>
+              <p>{config.name}：{config.frontLabel}从 01–{config.frontMax} 中选 {config.frontCount} 个，{config.backLabel}从 01–{config.backMax} 中选 {config.backCount} 个；各区内号码不重复。</p>
+            </fieldset>
+
             <fieldset className="number-mode number-mode--primary">
               <legend>生成模式</legend>
               <div className="number-segment number-segment--two">
@@ -238,12 +254,11 @@ export default function NumberAgentWorkspace() {
             </fieldset>
 
             <div className="number-form__grid">
-              <label className="number-field"><span>彩种</span><select value={form.kind} onChange={(event) => changeKind(event.target.value as LotteryKind)}><option value="ssq">双色球 · 6 + 1</option><option value="dlt">大乐透 · 5 + 2</option></select></label>
               <label className="number-field"><span>生成组数</span><select value={form.quantity} onChange={(event) => update('quantity', Number(event.target.value))}>{[1, 3, 5, 8, 10].map((quantity) => <option key={quantity} value={quantity}>{quantity} 组</option>)}</select></label>
               {form.mode === 'factor' && <>
                 <label className="number-field"><span>期号（权重追踪）</span><input value={form.drawLabel} onChange={(event) => update('drawLabel', event.target.value)} placeholder="例如 2026108" inputMode="numeric" /></label>
                 <label className="number-field"><span>覆盖上期{config.frontLabel}（可选）</span><input value={form.previous} onChange={(event) => update('previous', event.target.value)} placeholder={`留空则使用最新真实开奖`} inputMode="numeric" /></label>
-                <label className="number-field number-field--wide"><span>热门号黑名单（可选）</span><input value={form.hot} onChange={(event) => update('hot', event.target.value)} placeholder={`范围 01–${config.frontMax}，重复值自动去除`} inputMode="numeric" /><small>这是手动反拥挤过滤，不会提高中奖概率。</small></label>
+                <label className="number-field number-field--wide"><span>热门号黑名单（可选）</span><input value={form.hot} onChange={(event) => update('hot', event.target.value)} placeholder={`范围 01–${config.frontMax}，重复值自动去除`} inputMode="numeric" /><small>这些号码不会出现在因子模式的前区结果中。</small></label>
               </>}
             </div>
           </Surface>
@@ -286,7 +301,7 @@ export default function NumberAgentWorkspace() {
 
         <section className="number-results" aria-labelledby="result-title" aria-busy={isRunning}>
           <div className="number-results__head">
-            <div><span className="section-label">Output</span><h2 id="result-title">{(run?.mode ?? form.mode) === 'fair' ? '公平随机样本' : '因子实验样本'}</h2></div>
+            <div><span className="section-label">Output</span><h2 id="result-title">{run?.config.name ?? config.name} · {(run?.mode ?? form.mode) === 'fair' ? '公平随机样本' : '因子实验样本'}</h2></div>
             {run && <div className="number-results__actions">
               <span className="number-results__time mono">{formatTime(run.generatedAt)}</span>
               <Button variant="secondary" size="sm" onClick={() => void copyRun()} disabled={copyState === 'copying'}>
@@ -307,9 +322,9 @@ export default function NumberAgentWorkspace() {
                 <div className="number-pick__metrics"><span>奇偶 <b className="num">{pick.shape.odd}:{pick.shape.even}</b></span><span>大小 <b className="num">{pick.shape.high}:{pick.shape.low}</b></span><span>和值 <b className="num">{pick.shape.sum}</b></span><span>跨度 <b className="num">{pick.shape.span}</b></span></div>
                 <p>{pick.reason}</p><small>{pick.inspirationTrace}</small>
               </div>
-              <div className="number-pick__score"><span>拥挤度</span><strong className="num">{pick.crowdingScore}</strong><small>描述指标</small></div>
+              <div className="number-pick__score"><span>结构偏好分</span><strong className="num">{pick.crowdingScore}</strong><small>规则评分</small></div>
             </article>)}</div>
-            <p className="number-results__footnote">本次结果已保存在当前浏览器，供后续因子实验做跨批次去重。记录不会上传；公平随机模式不会使用它筛号。</p>
+            <p className="number-results__footnote">{saveWarning || '本次结果与实验参数已保存在当前浏览器，供后续回溯和跨批次去重。记录不会上传；公平随机模式不会使用它筛号。'}</p>
           </div>}
         </section>
       </div>

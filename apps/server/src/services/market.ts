@@ -1,3 +1,4 @@
+import { protectedRequest, CircuitOpenError, marketLog, marketDelay, checkCancelled, resetMarketResilience } from './market-resilience.js';
 import type { MarketData, KLine, StockSearchItem, MarketIndex, RealtimeSourcePreference } from '@trade/shared';
 import { fetchTushareDaily } from './tushare-market.js';
 import { fetchBaoStockDaily } from './baostock-market.js';
@@ -31,6 +32,7 @@ export class UpstreamUnavailableError extends Error {
 }
 
 interface FetchWithRetryOpts {
+  rateLimit?: boolean;
   /** Number of retry attempts on network failure (default 0). */
   retries?: number;
   /** Per-attempt timeout in ms (default 10000). */
@@ -57,13 +59,9 @@ function isRetryableNetworkError(err: unknown): boolean {
   return code !== undefined && retryableCodes.has(code);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Fetch wrapper with explicit per-attempt timeout and retry-with-backoff
- * on transient network failures. Never retries on 4xx, user-cancellation,
+ * on transient network failures, 429 and 5xx. Never retries on other 4xx, user-cancellation,
  * or on STOCK_NOT_FOUND parsing — those are caller-decoded.
  *
  *   attempt 1 ──fail──▶ wait 500ms ──▶ attempt 2 ──fail──▶ wait 1500ms ──▶ attempt 3
@@ -80,24 +78,30 @@ async function fetchWithRetry(url: string, opts: FetchWithRetryOpts = {}): Promi
       throw new DOMException('Request cancelled by caller', 'AbortError');
     }
 
-    const perAttemptTimeout = AbortSignal.timeout(timeoutMs);
-    const combinedSignal = externalSignal
-      ? AbortSignal.any([externalSignal, perAttemptTimeout])
-      : perAttemptTimeout;
+    let perAttemptTimeout: AbortSignal | undefined;
 
     try {
-      const res = await fetch(url, { signal: combinedSignal });
-      if (res.status >= 500 && attempt < retries) {
-        lastErr = new Error(`Upstream ${res.status}`);
-      } else {
-        return res;
-      }
+      const res = await protectedRequest(new URL(url).host, externalSignal, async () => {
+        perAttemptTimeout = AbortSignal.timeout(timeoutMs);
+        const combinedSignal = externalSignal
+          ? AbortSignal.any([externalSignal, perAttemptTimeout]) : perAttemptTimeout;
+        const response = await fetch(url, { signal: combinedSignal });
+        if (response.status === 429 || response.status >= 500) {
+          await response.body?.cancel();
+          throw Object.assign(new UpstreamUnavailableError(`Upstream HTTP ${response.status}`), { status: response.status });
+        }
+        // Consume the body inside the timeout/circuit scope, not just the headers.
+        const body = await response.arrayBuffer();
+        return new Response(body, { status: response.status, headers: response.headers });
+      }, opts.rateLimit);
+      return res;
     } catch (err: unknown) {
       lastErr = err;
       // user-initiated abort: do not retry
       if (externalSignal?.aborted) throw err;
       // not a retryable transport error: bail immediately
-      if (!isRetryableNetworkError(err) && !isTimeoutAbort(err, perAttemptTimeout)) {
+      if (err instanceof CircuitOpenError) throw new UpstreamUnavailableError(err.message, err);
+      if (!(err instanceof UpstreamUnavailableError) && !isRetryableNetworkError(err) && !(perAttemptTimeout && isTimeoutAbort(err, perAttemptTimeout))) {
         throw err;
       }
     }
@@ -105,7 +109,7 @@ async function fetchWithRetry(url: string, opts: FetchWithRetryOpts = {}): Promi
     if (attempt < retries) {
       // 500ms, 1500ms, 4500ms ...
       const backoffMs = 500 * Math.pow(3, attempt);
-      await sleep(backoffMs);
+      await marketDelay(backoffMs, externalSignal);
     }
   }
 
@@ -116,7 +120,8 @@ async function fetchWithRetry(url: string, opts: FetchWithRetryOpts = {}): Promi
 }
 
 function isTimeoutAbort(err: unknown, timeoutSignal: AbortSignal): boolean {
-  return err instanceof DOMException && err.name === 'AbortError' && timeoutSignal.aborted;
+  return err instanceof Error &&
+    (err.name === 'AbortError' || err.name === 'TimeoutError') && timeoutSignal.aborted;
 }
 
 interface EastMoneySearchResponse {
@@ -170,6 +175,8 @@ import type { KlinePeriod } from '@trade/shared';
 import { KLINE_PERIOD_TO_KLT } from '@trade/shared';
 
 export interface FetchOpts {
+  /** Apply process-wide scan request pacing. */
+  rateLimit?: boolean;
   /** Number of retries on network failure. Default 0 (no retry, for high-volume scanner). */
   retries?: number;
   /** Per-attempt timeout. Default 10s. */
@@ -288,25 +295,31 @@ export async function fetchRealtimeFromSource(
   source: RealtimeSourcePreference = 'auto',
   opts: FetchOpts = {},
 ): Promise<MarketData> {
-  if (source === 'eastmoney') return fetchRealtime(code, opts);
-  if (source === 'tencent') return fetchRealtimeTencent(code, opts);
-  if (source === 'hithink') return fetchRealtimeHithink(code, opts);
-  try {
-    return await fetchRealtime(code, opts);
-  } catch (eastMoneyError) {
+  const providers = { eastmoney: fetchRealtime, tencent: fetchRealtimeTencent, hithink: fetchRealtimeHithink };
+  if (source !== 'auto') return providers[source](code, opts);
+  let lastError: unknown;
+  for (const provider of ['eastmoney', 'tencent', 'hithink'] as const) {
+    checkCancelled(opts.signal);
+    if (provider === 'hithink' && !hasHithinkApiKey()) continue;
+    const started = Date.now();
+    const budget = AbortSignal.timeout(Math.min(opts.timeoutMs ?? 2500, 2500));
     try {
-      return await fetchRealtimeTencent(code, opts);
-    } catch {
-      if (hasHithinkApiKey()) {
-        try {
-          return await fetchRealtimeHithink(code, opts);
-        } catch {
-          // Preserve the original error so existing HTTP semantics remain stable.
-        }
-      }
-      throw eastMoneyError;
+      const quote = await providers[provider](code, {
+        ...opts, retries: 0, timeoutMs: Math.min(opts.timeoutMs ?? 2500, 2500),
+        // HiThink retries internally; bound its entire operation too.
+        signal: provider === 'hithink'
+          ? (opts.signal ? AbortSignal.any([opts.signal, budget]) : budget) : opts.signal,
+      });
+      marketLog('quote_resolved', { provider, code, elapsedMs: Date.now() - started });
+      return quote;
+    } catch (error) {
+      checkCancelled(opts.signal);
+      lastError = error;
+      marketLog('source_fallback', { provider, code, elapsedMs: Date.now() - started });
     }
   }
+  throw lastError;
+
 }
 
 interface EastMoneyListQuote {
@@ -331,10 +344,11 @@ interface EastMoneyListResponse {
 
 const REALTIME_PAGE_SIZE = 100;
 const REALTIME_MAX_PAGES = 80;
-const REALTIME_PAGE_CONCURRENCY = 6;
+const REALTIME_PAGE_CONCURRENCY = 3;
 let realtimeBatchCache: { fetchedAt: number; values: Map<string, MarketData> } | null = null;
 
 export function __resetRealtimeBatchCacheForTest(): void {
+  resetMarketResilience();
   realtimeBatchCache = null;
   tencentBatchCache = null;
   __resetHithinkStateForTest();
@@ -379,6 +393,7 @@ export async function fetchRealtimeBatch(
   const responses: EastMoneyListResponse[] = [first];
 
   for (let start = 2; start <= pages; start += REALTIME_PAGE_CONCURRENCY) {
+    checkCancelled(opts.signal);
     const pageNumbers = Array.from(
       { length: Math.min(REALTIME_PAGE_CONCURRENCY, pages - start + 1) },
       (_, index) => start + index,
@@ -389,6 +404,7 @@ export async function fetchRealtimeBatch(
     for (const result of settled) {
       if (result.status === 'fulfilled') responses.push(result.value);
     }
+    if (settled.every((result) => result.status === 'rejected')) break;
   }
 
   const all = new Map<string, MarketData>();
@@ -412,6 +428,7 @@ export async function fetchRealtimeBatch(
       });
     }
   }
+  checkCancelled(opts.signal);
   realtimeBatchCache = { fetchedAt: Date.now(), values: all };
   return new Map([...all].filter(([code]) => wanted.has(code)));
 }
@@ -423,21 +440,25 @@ export async function fetchRealtimeBatchTencent(
   opts: FetchOpts = {},
 ): Promise<Map<string, MarketData>> {
   const wanted = new Set(codes);
-  if (tencentBatchCache && Date.now() - tencentBatchCache.fetchedAt < 15_000) {
+  if (tencentBatchCache && Date.now() - tencentBatchCache.fetchedAt < 15_000 &&
+      [...wanted].every((code) => tencentBatchCache!.values.has(code))) {
     return new Map([...tencentBatchCache.values].filter(([code]) => wanted.has(code)));
   }
   const all = new Map<string, MarketData>();
   const chunks: string[][] = [];
   for (let index = 0; index < codes.length; index += 50) chunks.push(codes.slice(index, index + 50) as string[]);
-  for (let start = 0; start < chunks.length; start += 6) {
-    const settled = await Promise.allSettled(chunks.slice(start, start + 6).map((chunk) =>
+  for (let start = 0; start < chunks.length; start += 3) {
+    checkCancelled(opts.signal);
+    const settled = await Promise.allSettled(chunks.slice(start, start + 3).map((chunk) =>
       fetchTencentChunk(chunk, { retries: 2, timeoutMs: 8000, ...opts }),
     ));
     for (const response of settled) {
       if (response.status !== 'fulfilled') continue;
       for (const [code, quote] of response.value) all.set(code, quote);
     }
+    if (settled.every((response) => response.status === 'rejected')) break;
   }
+  checkCancelled(opts.signal);
   if (all.size === 0 && codes.length > 0) throw new UpstreamUnavailableError('Failed to reach qt.gtimg.cn');
   tencentBatchCache = { fetchedAt: Date.now(), values: all };
   return all;
@@ -459,36 +480,29 @@ export async function fetchRealtimeBatchFromSource(
   source: RealtimeSourcePreference = 'auto',
   opts: FetchOpts = {},
 ): Promise<Map<string, MarketData>> {
-  if (source === 'eastmoney') return fetchRealtimeBatch(codes, opts);
-  if (source === 'tencent') return fetchRealtimeBatchTencent(codes, opts);
-  if (source === 'hithink') return fetchRealtimeBatchHithink(codes, opts);
-
-  let eastMoney = new Map<string, MarketData>();
-  try {
-    eastMoney = await fetchRealtimeBatch(codes, opts);
-  } catch {
-    // Tencent below becomes the full fallback.
-  }
-  const missing = codes.filter((code) => !eastMoney.has(code));
-  if (missing.length === 0) return eastMoney;
-  try {
-    const tencent = await fetchRealtimeBatchTencent(missing, opts);
-    for (const [code, quote] of tencent) eastMoney.set(code, quote);
-  } catch {
-    // HiThink below gets one final opportunity to fill the missing rows.
-  }
-
-  const stillMissing = codes.filter((code) => !eastMoney.has(code));
-  if (stillMissing.length > 0 && hasHithinkApiKey()) {
+  checkCancelled(opts.signal);
+  if (codes.length === 0) return new Map();
+  const providers = { eastmoney: fetchRealtimeBatch, tencent: fetchRealtimeBatchTencent, hithink: fetchRealtimeBatchHithink };
+  if (source !== 'auto') return providers[source](codes, { ...opts, retries: 0 });
+  const result = new Map<string, MarketData>();
+  for (const provider of ['eastmoney', 'tencent', 'hithink'] as const) {
+    checkCancelled(opts.signal);
+    if (provider === 'hithink' && !hasHithinkApiKey()) continue;
+    const missing = codes.filter((code) => !result.has(code));
+    if (!missing.length) break;
+    const started = Date.now();
     try {
-      const hithink = await fetchRealtimeBatchHithink(stillMissing, opts);
-      for (const [code, quote] of hithink) eastMoney.set(code, quote);
-    } catch {
-      // A partial snapshot remains useful; only fail when every provider is empty.
+      const quotes = await providers[provider](missing, { ...opts, retries: 0, timeoutMs: Math.min(opts.timeoutMs ?? 2500, 2500) });
+      for (const [code, quote] of quotes) result.set(code, quote);
+      marketLog('batch_coverage', { provider, requested: missing.length, received: quotes.size, elapsedMs: Date.now() - started });
+    } catch (error) {
+      checkCancelled(opts.signal);
+      marketLog('batch_fallback', { provider, requested: missing.length, elapsedMs: Date.now() - started });
     }
   }
-  if (eastMoney.size === 0) throw new UpstreamUnavailableError('EastMoney, Tencent, and HiThink quote APIs are unavailable');
-  return eastMoney;
+  if (!result.size) throw new UpstreamUnavailableError('All quote providers are unavailable');
+  return result;
+
 }
 
 // ---- 大盘指数 ----
