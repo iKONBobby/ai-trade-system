@@ -1,0 +1,24 @@
+.root { min-width: 0; }
+.toolbar, .controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.toolbar { margin-bottom: var(--sp-3); }
+.controls { min-height: 36px; }
+.controls select { padding: var(--sp-2); border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--surface-1); color: var(--text-1); font: inherit; }
+.controls input { accent-color: var(--accent); }
+.note { color: var(--text-2); font-size: var(--text-sm); margin-top: var(--sp-3); }
+.note a { text-decoration: underline; }
+.scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-1); }
+.table { width: 100%; min-width: 1450px; border-collapse: separate; border-spacing: 0; font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: var(--text-sm); text-align: center; }
+.table caption { text-align: left; padding: var(--sp-3); color: var(--text-2); }
+.table th, .table td { height: 28px; min-width: 24px; padding: 0 var(--sp-1); white-space: nowrap; border-right: 1px solid var(--border-1); border-bottom: 1px solid var(--border-1); font-weight: 400; }
+.table thead th { background: var(--surface-3); color: var(--text-1); font-weight: 500; }
+.table tbody tr { background: var(--surface-1); }
+.table tbody tr:nth-child(even) { background: var(--surface-2); }
+.table tbody tr:hover { background: var(--surface-hover); }
+.table tbody th { position: sticky; left: 0; z-index: 1; background: inherit; }
+.table .boundary { border-right: 2px solid var(--border-2); }
+.front { color: color-mix(in srgb, var(--up) 65%, var(--text-1)); }
+.back { color: color-mix(in srgb, var(--info) 65%, var(--text-1)); }
+.ball { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: var(--r-pill); background: var(--up); color: var(--surface-base); font-weight: 600; }
+.blue { background: var(--info); }
+.hidden { visibility: hidden; }
+@media (max-width: 767px) { .controls, .controls select { min-height: var(--touch-min); } .controls select { font-size: 16px; } }

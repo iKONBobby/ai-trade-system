@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import type { LotteryHistoryResponse } from '@trade/shared';
 import { Badge, Button, Icon, PageHeader, Surface } from '@/components/ui/primitives';
 import Modal from '@/components/ui/Modal';
@@ -209,7 +210,7 @@ export default function NumberAgentWorkspace() {
         eyebrow="Random lab / evidence trail"
         title="三因子 · 随机实验室"
         description="真实历史只用于实验过滤与回溯；公平随机模式保持所有合法组合等概率。"
-        actions={<Badge tone="warning">纯娱乐 · 不提供中奖预测</Badge>}
+        actions={<><Link className="ui-button ui-button--secondary ui-button--md" href={`/number-lab/history?kind=${form.kind}`}><Icon name="chart" size={16} />历史开奖走势</Link><Badge tone="warning">纯娱乐 · 不提供中奖预测</Badge></>}
       />
 
       <div className="number-lab__notice" role="note">
