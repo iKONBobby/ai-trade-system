@@ -1,0 +1,76 @@
+{
+  "ssq": {
+    "count": 3528,
+    "first": [
+      "2003001",
+      "2003-02-23",
+      [
+        10,
+        11,
+        12,
+        13,
+        26,
+        28
+      ],
+      [
+        11
+      ]
+    ],
+    "last": [
+      "2026131",
+      "2026-11-15",
+      [
+        1,
+        10,
+        19,
+        26,
+        31,
+        33
+      ],
+      [
+        15
+      ]
+    ],
+    "mirror_compared": 3528,
+    "mismatches": [],
+    "gaps": [],
+    "source": "https://datachart.500.com/ssq/history/newinc/history.php?start=00001&end=26999"
+  },
+  "dlt": {
+    "count": 2948,
+    "first": [
+      "2007001",
+      "2007-05-30",
+      [
+        22,
+        24,
+        29,
+        31,
+        35
+      ],
+      [
+        4,
+        11
+      ]
+    ],
+    "last": [
+      "2026130",
+      "2026-11-14",
+      [
+        1,
+        7,
+        11,
+        27,
+        29
+      ],
+      [
+        2,
+        6
+      ]
+    ],
+    "mirror_compared": 2948,
+    "mismatches": [],
+    "gaps": [],
+    "source": "https://datachart.500.com/dlt/history/newinc/history.php?start=00001&end=26999"
+  }
+}
